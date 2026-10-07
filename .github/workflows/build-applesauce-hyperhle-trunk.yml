@@ -1,0 +1,115 @@
+name: Build Applesauce with HyperHLE trunk
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-applesauce-hyperhle-trunk.yml'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout build repo
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          set -euxo pipefail
+          sw_vers
+          xcodebuild -version
+          xcode-select -p
+          rustc --version || true
+          cargo --version || true
+
+      - name: Install build dependencies
+        run: |
+          set -euxo pipefail
+          brew install cmake ninja boost python || true
+          rustup target add aarch64-apple-ios
+
+      - name: Clone Applesauce iOS host
+        run: |
+          set -euxo pipefail
+          git clone --branch ios-host https://github.com/johnny901901901/Applesauce.git applesauce
+          cd applesauce
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          echo "APPLESauce base: $(git rev-parse HEAD)"
+
+      - name: Merge current HyperHLE trunk
+        run: |
+          set -euxo pipefail
+          cd applesauce
+          git remote add hyperhle https://github.com/KlugKlugTG/HyperHLE-Fork.git
+          git fetch hyperhle trunk
+          echo "HyperHLE trunk: $(git rev-parse hyperhle/trunk)"
+          if ! git merge --no-edit hyperhle/trunk; then
+            echo '----- MERGE CONFLICTS -----'
+            git status --short
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
+          echo "Merged tree: $(git rev-parse HEAD)"
+
+      - name: Initialize merged submodules
+        run: |
+          set -euxo pipefail
+          cd applesauce
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Make side-by-side test app
+        run: |
+          set -euxo pipefail
+          cd applesauce
+          sed -i '' 's/^PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = io.github.sloppytaco.applesaucehyperhletest/' platform/ios/Config/Build.xcconfig
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Applesauce HLE Test' platform/ios/Config/Info.plist
+          grep '^PRODUCT_BUNDLE_IDENTIFIER' platform/ios/Config/Build.xcconfig
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' platform/ios/Config/Info.plist
+
+      - name: Build shared SDL for iPhone
+        env:
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+        run: |
+          set -euxo pipefail
+          cd applesauce
+          export TOUCHHLE_BOOST_ROOT="$(brew --prefix boost)/include"
+          sh platform/ios/scripts/build-sdl-shared.sh iphoneos
+
+      - name: Build unsigned iPhone app
+        env:
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+        run: |
+          set -euxo pipefail
+          cd applesauce
+          export TOUCHHLE_BOOST_ROOT="$(brew --prefix boost)/include"
+          sh platform/ios/scripts/build-host.sh iphoneos Release
+
+      - name: Package unsigned IPA
+        run: |
+          set -euxo pipefail
+          cd applesauce
+          mkdir -p dist
+          sh platform/ios/scripts/package-ipa.sh dist/Applesauce-HyperHLE-Trunk-Test.ipa
+          shasum -a 256 dist/Applesauce-HyperHLE-Trunk-Test.ipa | tee dist/Applesauce-HyperHLE-Trunk-Test.ipa.sha256
+          {
+            echo "Applesauce base branch: johnny901901901/Applesauce ios-host"
+            echo "Merged HyperHLE source: KlugKlugTG/HyperHLE-Fork trunk"
+            echo "Merged HEAD: $(git rev-parse HEAD)"
+            echo "HyperHLE trunk: $(git rev-parse hyperhle/trunk)"
+            echo "Bundle ID: io.github.sloppytaco.applesaucehyperhletest"
+          } > dist/BUILD_INFO.txt
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Applesauce-HyperHLE-Trunk-Test
+          path: |
+            applesauce/dist/Applesauce-HyperHLE-Trunk-Test.ipa
+            applesauce/dist/Applesauce-HyperHLE-Trunk-Test.ipa.sha256
+            applesauce/dist/BUILD_INFO.txt
+          if-no-files-found: error
