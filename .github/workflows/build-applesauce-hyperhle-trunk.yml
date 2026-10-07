@@ -22,8 +22,8 @@ jobs:
           sw_vers
           xcodebuild -version
           xcode-select -p
-          rustc --version || true
-          cargo --version || true
+          rustc --version
+          cargo --version
 
       - name: Install build dependencies
         run: |
@@ -31,61 +31,109 @@ jobs:
           brew install cmake ninja boost python || true
           rustup target add aarch64-apple-ios
 
-      - name: Clone Applesauce iOS host
+      - name: Clone latest HyperHLE
         run: |
           set -euxo pipefail
-          git clone --branch ios-host https://github.com/johnny901901901/Applesauce.git applesauce
+          git clone --branch trunk https://github.com/KlugKlugTG/HyperHLE-Fork.git applesauce
           cd applesauce
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          echo "APPLESauce base: $(git rev-parse HEAD)"
+          echo "HyperHLE trunk: $(git rev-parse HEAD)"
 
-      - name: Merge current HyperHLE trunk
+      - name: Forward-port the Applesauce iOS changes
         run: |
           set -euxo pipefail
           cd applesauce
-          git remote add hyperhle https://github.com/KlugKlugTG/HyperHLE-Fork.git
-          git fetch hyperhle trunk
-          echo "HyperHLE trunk: $(git rev-parse hyperhle/trunk)"
-          if ! git merge --no-edit hyperhle/trunk; then
-            echo '----- MERGE CONFLICTS -----'
-            git status --short
-            git diff --name-only --diff-filter=U
-            exit 1
+          git remote add applesauce-port https://github.com/johnny901901901/Applesauce.git
+          git fetch applesauce-port ios-host
+
+          # Applesauce branched from HyperHLE immediately after this commit.
+          # Replay only the iOS-port commits on top of today's HyperHLE rather
+          # than merging two diverged emulator trees wholesale.
+          IOS_BASE=72cb2795eb5b8b215a7e29af0cda152822a12355
+          COMMITS=$(git rev-list --reverse "$IOS_BASE"..applesauce-port/ios-host)
+          echo "Forward-porting $(printf '%s\n' "$COMMITS" | sed '/^$/d' | wc -l | tr -d ' ') Applesauce commits"
+
+          for commit in $COMMITS; do
+            echo "===== cherry-pick $commit ====="
+            if ! git cherry-pick -X theirs "$commit"; then
+              echo "Cherry-pick stopped on $commit"
+              git status --short
+
+              # Keep the modern HyperHLE Dynarmic revision if the historical
+              # iOS commit tries to move the submodule pointer backwards.
+              if git diff --name-only --diff-filter=U | grep -qx 'vendor/dynarmic'; then
+                git checkout --ours vendor/dynarmic
+                git add vendor/dynarmic
+              fi
+
+              # Cargo.lock is generated; preserve the modern lockfile on a
+              # textual conflict and let Cargo update it for the iOS entry crate.
+              if git diff --name-only --diff-filter=U | grep -qx 'Cargo.lock'; then
+                git checkout --ours Cargo.lock
+                git add Cargo.lock
+              fi
+
+              # Documentation conflicts do not affect the test binary.
+              for f in README.md .github/ISSUE_TEMPLATE/config.yml; do
+                if git diff --name-only --diff-filter=U | grep -qx "$f"; then
+                  git checkout --theirs "$f"
+                  git add "$f"
+                fi
+              done
+
+              # If anything real is still unresolved, stop and expose it in logs.
+              if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+                echo '----- UNRESOLVED FILES -----'
+                git diff --name-only --diff-filter=U
+                exit 1
+              fi
+
+              git cherry-pick --continue
+            fi
+          done
+
+          echo "Forward-ported tree: $(git rev-parse HEAD)"
+
+      - name: Ensure iOS SDL source is present
+        run: |
+          set -euxo pipefail
+          cd applesauce
+          git submodule sync --recursive || true
+          git submodule update --init --recursive || true
+
+          # The iOS host intentionally uses a shared SDL build from this fork.
+          if [ ! -f vendor/rust-sdl2/sdl2-sys/SDL/CMakeLists.txt ]; then
+            rm -rf vendor/rust-sdl2
+            git clone --depth 1 --branch touchhle-ios-host https://github.com/johnny901901901/rust-sdl2.git vendor/rust-sdl2
+            git -C vendor/rust-sdl2 submodule update --init --recursive
           fi
-          echo "Merged tree: $(git rev-parse HEAD)"
-
-      - name: Initialize merged submodules
-        run: |
-          set -euxo pipefail
-          cd applesauce
-          git submodule sync --recursive
-          git submodule update --init --recursive
 
       - name: Make side-by-side test app
         run: |
           set -euxo pipefail
           cd applesauce
+          test -f platform/ios/Config/Build.xcconfig
+          test -f platform/ios/scripts/build-host.sh
+          test -f platform/ios/rust-entry/Cargo.toml
           sed -i '' 's/^PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = io.github.sloppytaco.applesaucehyperhletest/' platform/ios/Config/Build.xcconfig
           /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Applesauce HLE Test' platform/ios/Config/Info.plist
           grep '^PRODUCT_BUNDLE_IDENTIFIER' platform/ios/Config/Build.xcconfig
           /usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' platform/ios/Config/Info.plist
 
       - name: Build shared SDL for iPhone
-        env:
-          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
         run: |
           set -euxo pipefail
           cd applesauce
+          export DEVELOPER_DIR="$(xcode-select -p)"
           export TOUCHHLE_BOOST_ROOT="$(brew --prefix boost)/include"
           sh platform/ios/scripts/build-sdl-shared.sh iphoneos
 
       - name: Build unsigned iPhone app
-        env:
-          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
         run: |
           set -euxo pipefail
           cd applesauce
+          export DEVELOPER_DIR="$(xcode-select -p)"
           export TOUCHHLE_BOOST_ROOT="$(brew --prefix boost)/include"
           sh platform/ios/scripts/build-host.sh iphoneos Release
 
@@ -97,10 +145,10 @@ jobs:
           sh platform/ios/scripts/package-ipa.sh dist/Applesauce-HyperHLE-Trunk-Test.ipa
           shasum -a 256 dist/Applesauce-HyperHLE-Trunk-Test.ipa | tee dist/Applesauce-HyperHLE-Trunk-Test.ipa.sha256
           {
-            echo "Applesauce base branch: johnny901901901/Applesauce ios-host"
-            echo "Merged HyperHLE source: KlugKlugTG/HyperHLE-Fork trunk"
-            echo "Merged HEAD: $(git rev-parse HEAD)"
-            echo "HyperHLE trunk: $(git rev-parse hyperhle/trunk)"
+            echo "HyperHLE source: KlugKlugTG/HyperHLE-Fork trunk"
+            echo "HyperHLE base: $(git rev-parse $(git merge-base HEAD applesauce-port/ios-host) 2>/dev/null || true)"
+            echo "Final tree: $(git rev-parse HEAD)"
+            echo "Applesauce iOS port head replayed: $(git rev-parse applesauce-port/ios-host)"
             echo "Bundle ID: io.github.sloppytaco.applesaucehyperhletest"
           } > dist/BUILD_INFO.txt
 
