@@ -132,11 +132,24 @@ jobs:
 
       - name: Build unsigned iPhone app
         run: |
-          set -euxo pipefail
+          set -uo pipefail
           cd applesauce
           export DEVELOPER_DIR="$(xcode-select -p)"
           export TOUCHHLE_BOOST_ROOT="$(brew --prefix boost)/include"
-          sh platform/ios/scripts/build-host.sh iphoneos Release
+          set +e
+          sh platform/ios/scripts/build-host.sh iphoneos Release 2>&1 | tee ../build-host.log
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "build-host exit code: $status" | tee -a ../build-host.log
+          exit "$status"
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-host-diagnostics
+          path: build-host.log
+          if-no-files-found: warn
 
       - name: Package unsigned IPA
         run: |
