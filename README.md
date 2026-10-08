@@ -8,7 +8,7 @@ The build starts from working Applesauce iOS source at
 `c75278bda86c80cbcec2d8d1493b5be9d5a9e0d1` and applies the small patch in
 `patches/ios-rendering-backport.patch`. It retains Applesauce's existing
 HyperHLE core and iOS integration. **This is not a complete update to HyperHLE
-trunk. Order Up!! compatibility has not been verified on a phone.**
+trunk. The first phone test still showed a black screen.**
 
 ## Graphics changes
 
@@ -44,3 +44,22 @@ the previous comparison.
 Full credit for emulation belongs to [touchHLE](https://github.com/touchHLE/touchHLE)
 and [HyperHLE](https://github.com/KlugKlugTG/HyperHLE-Fork), and for the iPhone
 host to [Applesauce](https://github.com/johnny901901901/Applesauce).
+
+## Startup trace v2
+
+The first rendering test (run 6) launched with JIT and extracted Chef.wad,
+but the supplied phone log contained no first presentation message. Manual
+exit returned normally. This does not establish the startup blocker.
+
+The next diagnostic patch logs display-link creation, registration, pausing,
+and early callback entry/return; timer callback entry/return and autorelease
+pool completion; deferred Game Center authentication; and first nonempty
+GLES draws. Timer milestones are limited to fires 1, 2, 3, 60, 300 and 1800.
+The added tracing does not fix the dictionary subclass or missing-selector
+warnings. Those remain leads, not proven causes.
+
+Install the new IPA over Applesauce HLE Test using the same signing account.
+Fully close and reopen the host so process-wide first-call markers reset,
+enable JIT, launch Order Up!! once, leave it running for approximately
+60 seconds, then exit manually and export the complete log. Preserve the
+existing game data and settings. Look for `[STARTUP TRACE v2]` markers.
