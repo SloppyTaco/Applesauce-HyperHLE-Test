@@ -1,0 +1,40 @@
+diff --git a/src/objc/messages.rs b/src/objc/messages.rs
+index ac3e0537..11111111 100644
+--- a/src/objc/messages.rs
++++ b/src/objc/messages.rs
+@@ -191,6 +191,39 @@ fn objc_msgSend_inner(
+         env.cpu.regs_mut()[0..2].fill(0);
+         return;
+     }
++
++    // Order Up!! 1.0 boots far enough to start its renderer/audio, then the
++    // obsolete Chillingo Crystal SDK automatically opens its full-screen UI.
++    // On touchHLE that legacy Crystal overlay is not drawable/interactive, so
++    // it leaves the user on a black screen and immediately pauses game audio.
++    // Keep the game itself running by declining only Crystal UI activation for
++    // this title. Crystal networking/game-state code is left alone.
++    if env.bundle.bundle_identifier() == "com.chillingo.orderup" {
++        let selector_name = selector.as_str(&env.mem);
++
++        if selector_name == "activateCrystalUI"
++            && env.objc.get_class_name(receiver) == "CrystalSession"
++        {
++            log_once!(
++                "[ORDER UP FIX v5] Suppressing obsolete Crystal full-screen UI activation."
++            );
++            env.cpu.regs_mut()[0..2].fill(0);
++            return;
++        }
++
++        if selector_name == "isCrystalUIActive"
++            && env.objc.get_class_name(receiver) == "CrystalSession"
++        {
++            // BOOL return value: NO.
++            env.cpu.regs_mut()[0] = 0;
++            env.cpu.regs_mut()[1] = 0;
++            return;
++        }
++    }
+ 
+     let orig_class = super2.unwrap_or_else(|| ObjC::read_isa(receiver, &env.mem));
+     // Graceful exit if isa is nil — this typically means the object was
