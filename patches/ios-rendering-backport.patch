@@ -1,3 +1,46 @@
+diff --git a/platform/ios/Sources/NativeHost.swift b/platform/ios/Sources/NativeHost.swift
+index 1125acd9..0cb2885a 100644
+--- a/platform/ios/Sources/NativeHost.swift
++++ b/platform/ios/Sources/NativeHost.swift
+@@ -693,7 +693,7 @@ final class TouchHLENativeHost: NSObject {
+         }
+ 
+         let controlsWindow = GameControlsWindow(windowScene: windowScene)
+-        controlsWindow.windowLevel = UIWindow.Level.normal + 3
++        controlsWindow.windowLevel = UIWindow.Level.alert + 1
+         controlsWindow.accessibilityIdentifier = "touchHLE.gameControls"
+         controlsWindow.backgroundColor = .clear
+ 
+@@ -796,6 +796,7 @@ final class TouchHLENativeHost: NSObject {
+ 
+     @MainActor
+     @objc private func returnToLibrary() {
++        NSLog("touchHLE: close button pressed; requesting emulator exit")
+         EmulatorCore.running?.requestExit()
+     }
+ }
+diff --git a/src/environment.rs b/src/environment.rs
+index 3a4390b4..250a0032 100644
+--- a/src/environment.rs
++++ b/src/environment.rs
+@@ -1463,6 +1463,17 @@ impl Environment {
+                 return;
+             }
+ 
++            // Poll native controls while paused, but do not resume guest code
++            // (including GL calls) until SDL reports foreground activation.
++            #[cfg(target_os = "ios")]
++            if let Some(window) = self.window.as_mut() {
++                if window.host_backgrounded {
++                    window.poll_for_events(&self.options);
++                    std::thread::sleep(Duration::from_millis(10));
++                    continue;
++                }
++            }
++
+             if stepping {
+                 self.remaining_ticks = None;
+             } else {
 diff --git a/src/frameworks/core_animation/ca_display_link.rs b/src/frameworks/core_animation/ca_display_link.rs
 index b2190f6b..bafd0464 100644
 --- a/src/frameworks/core_animation/ca_display_link.rs
@@ -155,20 +198,29 @@ index 0c4cee30..fa967555 100644
      env.objc
          .borrow_mut::<NSTimerHostObject>(timer)
 diff --git a/src/frameworks/game_kit/gk_local_player.rs b/src/frameworks/game_kit/gk_local_player.rs
-index 19ab8bc9..c3c6dba6 100644
+index 19ab8bc9..ebd5ad9b 100644
 --- a/src/frameworks/game_kit/gk_local_player.rs
 +++ b/src/frameworks/game_kit/gk_local_player.rs
-@@ -208,7 +208,9 @@ pub const CLASSES: ClassExports = objc_classes! {
- + (())setDefaultLeaderboardIdentifier:(id)_identifier
-                withCompletionHandler:(id)handler {
-     let error = make_not_authenticated_error(env);
-+    log!("[STARTUP TRACE v2] Game Center invoking completion");
-     invoke_error_block(env, handler, error);
-+    log!("[STARTUP TRACE v2] Game Center completion returned");
+@@ -8,6 +8,7 @@
+ use crate::abi::{CallFromHost, GuestFunction};
+ use crate::dyld::{ConstantExports, HostConstant};
+ use crate::frameworks::foundation::ns_string;
++use crate::libc::blocks::{_Block_copy, _Block_release};
+ use crate::mem::{ConstVoidPtr, MutPtr, Ptr};
+ use crate::objc::{
+     autorelease, id, msg, msg_class, nil, objc_classes, release, ClassExports, HostObject,
+@@ -251,8 +252,8 @@ pub const CLASSES: ClassExports = objc_classes! {
+     release(env, alias);
+     release(env, display_name);
+     release(env, friends);
+-    release(env, authenticate_handler);
+-    release(env, pending);
++    _Block_release(env, authenticate_handler.cast_const().cast());
++    _Block_release(env, pending.cast_const().cast());
+     env.objc.dealloc_object(this, &mut env.mem)
  }
  
- // Apple reference (iOS 7+):
-@@ -301,6 +303,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+@@ -301,6 +302,7 @@ pub const CLASSES: ClassExports = objc_classes! {
  // deferred delegate callbacks, so it fires on the next run-loop turn on the
  // main thread.
  - (())authenticateWithCompletionHandler:(id)completion_handler {
@@ -176,6 +228,25 @@ index 19ab8bc9..c3c6dba6 100644
      if completion_handler == nil {
          // Still post the notification, mirroring GameKit's ordering.
          post_auth_change_notification(env);
+@@ -309,7 +311,8 @@ pub const CLASSES: ClassExports = objc_classes! {
+ 
+     // Block_copy the handler so it survives the caller's stack frame, and
+     // park it on the host object until the deferred selector fires.
+-    let retained: id = msg![env; completion_handler copy];
++    let retained: id = Ptr::from_bits(_Block_copy(env, completion_handler.cast_const().cast()).to_bits());
++    log!("[CALLBACK FIX v3] Game Center copied handler {:?} -> {:?}", completion_handler, retained);
+     {
+         let host = env.objc.borrow_mut::<GKLocalPlayerHostObject>(this);
+         // If a previous authentication is still pending, drop it; GameKit
+@@ -317,7 +320,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+         let old = host.pending_completion_handler;
+         host.pending_completion_handler = retained;
+         if old != nil {
+-            release(env, old);
++            _Block_release(env, old.cast_const().cast());
+         }
+     }
+ 
 @@ -332,6 +335,7 @@ pub const CLASSES: ClassExports = objc_classes! {
  // match GameKit's documented ordering, then invokes the block and releases
  // our retained reference.
@@ -184,16 +255,49 @@ index 19ab8bc9..c3c6dba6 100644
      let handler = {
          let host = env.objc.borrow_mut::<GKLocalPlayerHostObject>(this);
          let h = host.pending_completion_handler;
-@@ -345,7 +349,9 @@ pub const CLASSES: ClassExports = objc_classes! {
+@@ -345,8 +349,10 @@ pub const CLASSES: ClassExports = objc_classes! {
      post_auth_change_notification(env);
  
      let error = make_not_authenticated_error(env);
 +    log!("[STARTUP TRACE v2] Game Center invoking completion");
      invoke_error_block(env, handler, error);
+-    release(env, handler);
 +    log!("[STARTUP TRACE v2] Game Center completion returned");
-     release(env, handler);
++    _Block_release(env, handler.cast_const().cast());
  }
  
+ // Apple reference (iOS 6+):
+@@ -367,7 +373,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+ - (())setAuthenticateHandler:(id)handler {
+     // Replace any previously stored handler (GameKit keeps exactly one).
+     let retained: id = if handler != nil {
+-        msg![env; handler copy]
++        Ptr::from_bits(_Block_copy(env, handler.cast_const().cast()).to_bits())
+     } else {
+         nil
+     };
+@@ -376,7 +382,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+         let old = host.authenticate_handler;
+         host.authenticate_handler = retained;
+         if old != nil {
+-            release(env, old);
++            _Block_release(env, old.cast_const().cast());
+         }
+     }
+     if retained == nil {
+@@ -402,9 +408,12 @@ pub const CLASSES: ClassExports = objc_classes! {
+     if handler == nil {
+         return;
+     }
++    // Keep a local ownership reference across reentrant guest callbacks.
++    let handler: id = Ptr::from_bits(_Block_copy(env, handler.cast_const().cast()).to_bits());
+     post_auth_change_notification(env);
+     let error = make_not_authenticated_error(env);
+     invoke_vc_error_block(env, handler, nil, error);
++    _Block_release(env, handler.cast_const().cast());
+ }
+ 
+ // MARK: - Friends
 diff --git a/src/frameworks/opengles/eagl.rs b/src/frameworks/opengles/eagl.rs
 index b18a0d6c..aa08ba7f 100644
 --- a/src/frameworks/opengles/eagl.rs
@@ -542,3 +646,310 @@ index 82dd625b..f595110a 100644
      let mut fog_enabled: GLboolean = 0;
      gles.GetBooleanv(gles11::FOG, &mut fog_enabled);
      if fog_enabled != 0 {
+diff --git a/src/lib.rs b/src/lib.rs
+index 429427e2..e8ae08a2 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -71,6 +71,7 @@ static HOST_FPS_BITS: AtomicU32 = AtomicU32::new(0);
+ #[cfg(target_os = "ios")]
+ pub fn request_host_exit() {
+     HOST_EXIT_REQUESTED.store(true, Ordering::Release);
++    log!("[LIFECYCLE FIX v3] Host exit request received.");
+ }
+ 
+ #[cfg(target_os = "ios")]
+diff --git a/src/libc/blocks.rs b/src/libc/blocks.rs
+index 6214d0f7..1346a2e7 100644
+--- a/src/libc/blocks.rs
++++ b/src/libc/blocks.rs
+@@ -11,83 +11,181 @@
+ //! They are documented in the
+ //! [Blocks ABI](https://clang.llvm.org/docs/Block-ABI-Apple.html#imported-variables-1).
+ //!
+-//! For touchHLE we provide working implementations of `_Block_copy`,
+-//! `_Block_release`, and `_Block_object_assign` / `_Block_object_dispose`
+-//! that perform the appropriate ARC retains/releases. Block copying itself
+-//! is not implemented — a captured-block "copy" returns the same pointer
+-//! (matching how _global_ blocks behave on iOS) — but the bookkeeping for
+-//! captured ObjC objects is correct, so games that simply use blocks as
+-//! callbacks (e.g. `MFMailComposeViewController` completion handlers,
+-//! `dispatch_async`) link and run.
++//! Stack callbacks must be promoted before asynchronous delivery. These
++//! helpers implement the non-GC, 32-bit Blocks ABI used by guest apps.
+ 
++use crate::abi::{CallFromHost, GuestFunction};
+ use crate::dyld::{export_c_func, FunctionExports};
+ use crate::mem::{ConstVoidPtr, MutVoidPtr, Ptr};
+ use crate::objc::{id, release, retain};
+ use crate::Environment;
+ 
+-/// Bit-flag values passed to `_Block_object_assign` / `_Block_object_dispose`.
+-/// See the Blocks ABI document referenced above.
+-const BLOCK_FIELD_IS_OBJECT: i32 = 3;
+-const BLOCK_FIELD_IS_BLOCK: i32 = 7;
+-const BLOCK_FIELD_IS_BYREF: i32 = 8;
+-const BLOCK_FIELD_IS_WEAK: i32 = 16;
+-#[allow(dead_code)]
+-const BLOCK_BYREF_CALLER: i32 = 128;
+-
+-/// `_Block_copy(block) -> block`. We don't actually duplicate the block
+-/// (block copies are reference-counted under-the-hood and stack blocks need
+-/// promotion to the heap, both of which require deeper Block ABI work),
+-/// so we just return the input pointer. Apps that store copied blocks for
+-/// later use will continue to see the same heap-resident block; this is
+-/// correct for blocks compiled as `__NSConcreteGlobalBlock` (the common
+-/// case for static literal blocks) and best-effort for stack blocks.
+-fn _Block_copy(_env: &mut Environment, block: ConstVoidPtr) -> ConstVoidPtr {
+-    block
++const OBJECT: i32 = 3;
++const BLOCK: i32 = 7;
++const BYREF: i32 = 8;
++const WEAK: i32 = 16;
++const BYREF_CALLER: i32 = 128;
++const NEEDS_FREE: u32 = 1 << 24;
++const COPY_DISPOSE: u32 = 1 << 25;
++const GLOBAL: u32 = 1 << 28;
++const REFCOUNT: u32 = 0xffff;
++
++fn word(env: &Environment, ptr: ConstVoidPtr, index: u32) -> u32 {
++    env.mem.read(ptr.cast::<u32>() + index)
++}
++
++fn set_word(env: &mut Environment, ptr: ConstVoidPtr, index: u32, value: u32) {
++    env.mem.write(ptr.cast_mut().cast::<u32>() + index, value);
++}
++
++fn duplicate(env: &mut Environment, src: ConstVoidPtr, size: u32) -> ConstVoidPtr {
++    let bytes = env.mem.bytes_at(src.cast(), size).to_vec();
++    let dst = env.mem.alloc(size);
++    env.mem.bytes_at_mut(dst.cast(), size).copy_from_slice(&bytes);
++    dst.cast_const()
+ }
+ 
+-fn _Block_release(_env: &mut Environment, _block: ConstVoidPtr) {}
+-
+-/// `_Block_object_assign(destAddr, object, flags)`. Called by the
+-/// compiler-generated copy helper to retain `object` and store it at
+-/// `destAddr`. We perform the retain side-effect via `objc::retain`.
+-///
+-/// `flags` is a bitwise OR of `BLOCK_FIELD_IS_*` constants telling us what
+-/// the captured value is — an ObjC object, another block, or a `__block`
+-/// storage location. For ObjC objects and blocks we retain; for `__weak`
+-/// captures we do nothing (per the Blocks ABI).
+-fn _Block_object_assign(
+-    env: &mut Environment,
+-    dest_addr: MutVoidPtr,
+-    object: ConstVoidPtr,
+-    flags: i32,
+-) {
+-    if flags & BLOCK_FIELD_IS_WEAK != 0 {
+-        // __weak: no retain. Just store the pointer.
+-        env.mem.write(dest_addr.cast(), object);
++fn copy_helper(env: &mut Environment, addr: u32, dst: ConstVoidPtr, src: ConstVoidPtr) {
++    if addr != 0 {
++        let function = GuestFunction::from_addr_with_thumb_bit(addr);
++        <GuestFunction as CallFromHost<(), (ConstVoidPtr, ConstVoidPtr)>>::call_from_host(&function, env, (dst, src));
++    }
++}
++
++fn dispose_helper(env: &mut Environment, addr: u32, ptr: ConstVoidPtr) {
++    if addr != 0 {
++        let function = GuestFunction::from_addr_with_thumb_bit(addr);
++        <GuestFunction as CallFromHost<(), (ConstVoidPtr,)>>::call_from_host(&function, env, (ptr,));
++    }
++}
++
++fn increment(env: &mut Environment, ptr: ConstVoidPtr, offset: u32, flags: u32) {
++    if flags & REFCOUNT != REFCOUNT {
++        set_word(env, ptr, offset, flags + 1);
++    }
++}
++
++// Saturated reference counts are deliberately never freed.
++fn decrement(env: &mut Environment, ptr: ConstVoidPtr, offset: u32, flags: u32) -> bool {
++    if flags & REFCOUNT == REFCOUNT || flags & REFCOUNT == 0 {
++        return false;
++    }
++    set_word(env, ptr, offset, flags - 1);
++    flags & REFCOUNT == 1
++}
++
++pub fn _Block_copy(env: &mut Environment, block: ConstVoidPtr) -> ConstVoidPtr {
++    if block.is_null() {
++        return block;
++    }
++    let flags = word(env, block, 1);
++    if flags & GLOBAL != 0 {
++        return block;
++    }
++    if flags & NEEDS_FREE != 0 {
++        increment(env, block, 1, flags);
++        return block;
++    }
++    let descriptor = Ptr::from_bits(word(env, block, 4));
++    let size = word(env, descriptor, 1);
++    assert!(size >= 20, "Invalid guest block size");
++    let result = duplicate(env, block, size);
++    set_word(env, result, 1, (flags & !REFCOUNT) | NEEDS_FREE | 1);
++    if flags & COPY_DISPOSE != 0 {
++        let helper = word(env, descriptor, 2);
++        copy_helper(env, helper, result, block);
++    }
++    result
++}
++
++pub fn _Block_release(env: &mut Environment, block: ConstVoidPtr) {
++    if block.is_null() {
+         return;
+     }
+-    let kind = flags & 0xFF & !BLOCK_FIELD_IS_WEAK;
+-    if kind == BLOCK_FIELD_IS_OBJECT || kind == BLOCK_FIELD_IS_BLOCK {
+-        let obj: id = Ptr::from_bits(object.to_bits());
+-        retain(env, obj);
++    let flags = word(env, block, 1);
++    if flags & GLOBAL != 0 || flags & NEEDS_FREE == 0 {
++        return;
++    }
++    if decrement(env, block, 1, flags) {
++        if flags & COPY_DISPOSE != 0 {
++            let descriptor = Ptr::from_bits(word(env, block, 4));
++            let helper = word(env, descriptor, 3);
++            dispose_helper(env, helper, block);
++        }
++        env.mem.free(Ptr::from_bits(block.to_bits()));
+     }
+-    // BLOCK_FIELD_IS_BYREF: caller already manages the byref structure.
+-    env.mem.write(dest_addr.cast(), object);
+ }
+ 
+-/// `_Block_object_dispose(object, flags)`. Called by the compiler-generated
+-/// dispose helper to release a captured object that was retained by
+-/// `_Block_object_assign`.
+-fn _Block_object_dispose(env: &mut Environment, object: ConstVoidPtr, flags: i32) {
+-    if flags & BLOCK_FIELD_IS_WEAK != 0 {
++fn copy_byref(env: &mut Environment, source: ConstVoidPtr) -> ConstVoidPtr {
++    if source.is_null() {
++        return source;
++    }
++    let source = Ptr::from_bits(word(env, source, 1));
++    let flags = word(env, source, 2);
++    if flags & NEEDS_FREE != 0 {
++        increment(env, source, 2, flags);
++        return source;
++    }
++    let size = word(env, source, 3);
++    assert!(size >= 16, "Invalid guest byref size");
++    let result = duplicate(env, source, size);
++    // One reference belongs to the stack, the other to the copied block.
++    set_word(env, result, 2, (flags & !REFCOUNT) | NEEDS_FREE | 2);
++    set_word(env, source, 1, result.to_bits());
++    set_word(env, result, 1, result.to_bits());
++    if flags & COPY_DISPOSE != 0 {
++        let helper = word(env, source, 4);
++        copy_helper(env, helper, result, source);
++    }
++    result
++}
++
++fn release_byref(env: &mut Environment, ptr: ConstVoidPtr) {
++    if ptr.is_null() {
+         return;
+     }
+-    let kind = flags & 0xFF & !BLOCK_FIELD_IS_WEAK;
+-    if kind == BLOCK_FIELD_IS_OBJECT || kind == BLOCK_FIELD_IS_BLOCK {
+-        let obj: id = Ptr::from_bits(object.to_bits());
+-        release(env, obj);
++    let ptr = Ptr::from_bits(word(env, ptr, 1));
++    let flags = word(env, ptr, 2);
++    if flags & NEEDS_FREE != 0 && decrement(env, ptr, 2, flags) {
++        if flags & COPY_DISPOSE != 0 {
++            let helper = word(env, ptr, 5);
++            dispose_helper(env, helper, ptr);
++        }
++        env.mem.free(Ptr::from_bits(ptr.to_bits()));
++    }
++}
++
++fn _Block_object_assign(env: &mut Environment, dest: MutVoidPtr, object: ConstVoidPtr, flags: i32) {
++    let value = if flags & BYREF_CALLER != 0 {
++        // MRC __block object variables are not retained by byref helpers.
++        object
++    } else if flags & BYREF != 0 {
++        copy_byref(env, object)
++    } else if flags & WEAK != 0 {
++        object
++    } else if flags & 7 == BLOCK {
++        _Block_copy(env, object)
++    } else {
++        if flags & 7 == OBJECT {
++            let obj: id = Ptr::from_bits(object.to_bits());
++            retain(env, obj);
++        }
++        object
++    };
++    env.mem.write(dest.cast(), value);
++}
++
++fn _Block_object_dispose(env: &mut Environment, object: ConstVoidPtr, flags: i32) {
++    if flags & BYREF != 0 {
++        release_byref(env, object);
++    } else if flags & (BYREF_CALLER | WEAK) == 0 {
++        if flags & 7 == BLOCK {
++            _Block_release(env, object);
++        } else if flags & 7 == OBJECT {
++            let obj: id = Ptr::from_bits(object.to_bits());
++            release(env, obj);
++        }
+     }
+-    // BLOCK_FIELD_IS_BYREF: caller manages.
+ }
+ 
+ pub const FUNCTIONS: FunctionExports = &[
+diff --git a/src/window.rs b/src/window.rs
+index 3d9fd6fc..e002f038 100644
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -540,6 +540,8 @@ pub struct Window {
+     /// terminate).
+     high_priority_event: Option<Event>,
+     enable_event_polling: bool,
++    #[cfg(target_os = "ios")]
++    pub(super) host_backgrounded: bool,
+     #[cfg(target_os = "macos")]
+     max_height: u32,
+     #[cfg(target_os = "macos")]
+@@ -735,6 +737,8 @@ impl Window {
+             last_polled: Instant::now() - Duration::from_secs(1),
+             high_priority_event: None,
+             enable_event_polling: true,
++            #[cfg(target_os = "ios")]
++            host_backgrounded: false,
+             #[cfg(target_os = "macos")]
+             max_height,
+             #[cfg(target_os = "macos")]
+@@ -1191,8 +1195,10 @@ impl Window {
+                     }
+                 }
+                 E::AppWillEnterBackground { .. } => {
+-                    if cfg!(target_os = "ios") {
+-                        log!("Received app-will-resign-active event; allowing iOS to suspend and resume the host.");
++                    #[cfg(target_os = "ios")]
++                    {
++                        self.host_backgrounded = true;
++                        log!("[LIFECYCLE FIX v3] Pausing guest execution for iOS background.");
+                         continue;
+                     }
+                     log!("Received app-will-resign-active event.");
+@@ -1205,6 +1211,12 @@ impl Window {
+                     self.enable_event_polling = false;
+                     continue;
+                 }
++                #[cfg(target_os = "ios")]
++                E::AppDidEnterForeground { .. } => {
++                    self.host_backgrounded = false;
++                    log!("[LIFECYCLE FIX v3] Resuming guest execution in foreground.");
++                    continue;
++                }
+                 E::AppTerminating { .. } => {
+                     log!("Received app-will-terminate event.");
+                     assert!(self.high_priority_event.is_none());
