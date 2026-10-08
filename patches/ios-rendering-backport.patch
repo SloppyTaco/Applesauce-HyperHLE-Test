@@ -646,6 +646,96 @@ index 82dd625b..f595110a 100644
      let mut fog_enabled: GLboolean = 0;
      gles.GetBooleanv(gles11::FOG, &mut fog_enabled);
      if fog_enabled != 0 {
+diff --git a/src/frameworks/uikit/ui_nib.rs b/src/frameworks/uikit/ui_nib.rs
+index 992d68ce..5750fc79 100644
+--- a/src/frameworks/uikit/ui_nib.rs
++++ b/src/frameworks/uikit/ui_nib.rs
+@@ -599,6 +599,24 @@ fn load_nib_file(env: &mut Environment, ui_nib: id, path: GuestPathBuf) -> Resul
+         }
+     }
+ 
++    // Integrated NIBs contain both the controller and its root view. The view
++    // is already non-nil, so the lazy -view path cannot be relied on to send
++    // viewDidLoad. Wait until ALL outlets and awakeFromNib calls finish first.
++    if objects != nil {
++        let controller_class = env.objc.get_known_class("UIViewController", &mut env.mem);
++        let count: NSUInteger = msg![env; objects count];
++        for i in 0..count {
++            let object: id = msg![env; objects objectAtIndex:i];
++            if object == nil {
++                continue;
++            }
++            let class: Class = msg![env; object class];
++            if env.objc.class_is_subclass_of(class, controller_class) {
++                super::ui_view_controller::finish_loading_view(env, object);
++            }
++        }
++    }
++
+     let visibles_key = get_static_str(env, "UINibVisibleWindowsKey");
+     let visibles: id = msg![env; unarchiver decodeObjectForKey:visibles_key];
+     if visibles != nil {
+diff --git a/src/frameworks/uikit/ui_view_controller.rs b/src/frameworks/uikit/ui_view_controller.rs
+index 3ba98d5b..87d30889 100644
+--- a/src/frameworks/uikit/ui_view_controller.rs
++++ b/src/frameworks/uikit/ui_view_controller.rs
+@@ -31,6 +31,10 @@ pub(crate) struct UIViewControllerHostObject {
+     /// The root view.
+     /// `UIView*`
+     view: id,
++    /// A decoded view still needs its load callback after NIB outlets connect.
++    did_load_view: bool,
++    /// Defer NIB completion while an overridden loadView is still running.
++    loading_view: bool,
+     /// Nib name to be used at the load
+     /// of the root view, may be nil.
+     /// `NSString*`
+@@ -76,6 +80,18 @@ pub(crate) struct UIViewControllerHostObject {
+ }
+ impl HostObject for UIViewControllerHostObject {}
+ 
++/// Deliver the callback once per load, including views decoded with a NIB.
++/// Mark before calling guest code: viewDidLoad may access or replace its view.
++pub(super) fn finish_loading_view(env: &mut Environment, controller: id) {
++    let host = env.objc.borrow_mut::<UIViewControllerHostObject>(controller);
++    if host.view == nil || host.did_load_view || host.loading_view {
++        return;
++    }
++    host.did_load_view = true;
++    log!("[VIEW LOAD FIX v4] Delivering viewDidLoad to {:?}", controller);
++    () = msg![env; controller viewDidLoad];
++}
++
+ // Apple's UIRectEdgeAll = UIRectEdgeTop|UIRectEdgeLeft|UIRectEdgeBottom|UIRectEdgeRight = 15
+ const UI_RECT_EDGE_ALL: NSUInteger = 15;
+ 
+@@ -315,6 +331,9 @@ pub const CLASSES: ClassExports = objc_classes! {
+ 
+     let host_obj = env.objc.borrow_mut::<UIViewControllerHostObject>(this);
+     let old_view = std::mem::replace(&mut host_obj.view, new_view);
++    if new_view == nil {
++        host_obj.did_load_view = false;
++    }
+     if old_view != nil {
+         set_view_controller(env, old_view, nil);
+     }
+@@ -345,12 +364,12 @@ pub const CLASSES: ClassExports = objc_classes! {
+     // hold a dangling pointer to the just-released placeholder.
+     let view = env.objc.borrow::<UIViewControllerHostObject>(this).view;
+     if view == nil {
++        env.objc.borrow_mut::<UIViewControllerHostObject>(this).loading_view = true;
+         () = msg![env; this loadView];
+-        () = msg![env; this viewDidLoad];
+-        env.objc.borrow::<UIViewControllerHostObject>(this).view
+-    } else {
+-        view
++        env.objc.borrow_mut::<UIViewControllerHostObject>(this).loading_view = false;
+     }
++    finish_loading_view(env, this);
++    env.objc.borrow::<UIViewControllerHostObject>(this).view
+ }
+ 
+ // Перехватываем NIB-соединение (KVC) для свойства view
 diff --git a/src/lib.rs b/src/lib.rs
 index 429427e2..e8ae08a2 100644
 --- a/src/lib.rs
