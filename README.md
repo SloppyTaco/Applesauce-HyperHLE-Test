@@ -63,3 +63,33 @@ Fully close and reopen the host so process-wide first-call markers reset,
 enable JIT, launch Order Up!! once, leave it running for approximately
 60 seconds, then exit manually and export the complete log. Preserve the
 existing game data and settings. Look for `[STARTUP TRACE v2]` markers.
+
+## Callback and lifecycle fix v3
+
+Run 7's phone trace reached display-link callbacks 60 and 300, with callbacks
+returning and timer pools draining. Game Center's deferred delivery entered,
+but never reached its invocation marker. The implementation copied the guest
+block using an Objective-C `copy` message even though the block isa symbols
+are placeholders, then silently skipped delivery when the result was nil.
+
+This patch uses the C Blocks runtime directly for stored Game Center handlers.
+Stack blocks are copied using their descriptor size, compiler copy/dispose
+helpers run, heap ownership is counted, and captured blocks/byref storage
+are managed. Handler replacement and destruction release the owned block;
+the persistent authenticate handler also holds a temporary reference during
+reentrant callbacks. This does not add general Objective-C block classes.
+The new `[CALLBACK FIX v3]` marker records the original and copied addresses.
+
+On iOS, the scheduler pauses guest execution after the background event while
+continuing event polling and checking the exit request. Foreground activation
+resumes execution. The exit overlay is raised above normal game windows, and
+both its button and the Rust exit entry point log requests. These changes
+address background GPU submissions and make exit failures distinguishable;
+on-device close/resume behavior still needs validation.
+
+The black-screen cause is not yet confirmed. Test this build in place over
+the existing test app, preserving data and settings. The key evidence is
+whether Game Center now logs `invoking completion` and `completion returned`,
+whether nonempty draws/presentation start, and whether the close request
+reaches `Returning to the iOS host library`. Do not infer successful rendering
+from a successful build alone.
