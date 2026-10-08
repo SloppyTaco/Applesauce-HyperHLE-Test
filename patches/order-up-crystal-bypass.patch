@@ -2,7 +2,7 @@ diff --git a/src/objc/messages.rs b/src/objc/messages.rs
 index ac3e0537..11111111 100644
 --- a/src/objc/messages.rs
 +++ b/src/objc/messages.rs
-@@ -191,6 +191,39 @@ fn objc_msgSend_inner(
+@@ -191,6 +191,36 @@ fn objc_msgSend_inner(
          env.cpu.regs_mut()[0..2].fill(0);
          return;
      }
@@ -35,6 +35,7 @@ index ac3e0537..11111111 100644
 +            return;
 +        }
 +    }
++
  
      let orig_class = super2.unwrap_or_else(|| ObjC::read_isa(receiver, &env.mem));
      // Graceful exit if isa is nil — this typically means the object was
