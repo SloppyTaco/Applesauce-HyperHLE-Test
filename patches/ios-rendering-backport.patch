@@ -1,5 +1,201 @@
+diff --git a/src/frameworks/core_animation/ca_display_link.rs b/src/frameworks/core_animation/ca_display_link.rs
+index b2190f6b..bafd0464 100644
+--- a/src/frameworks/core_animation/ca_display_link.rs
++++ b/src/frameworks/core_animation/ca_display_link.rs
+@@ -43,6 +43,7 @@ struct CADisplayLinkHostObject {
+     /// this pointer must not be used.
+     ns_timer: id,
+     paused: bool,
++    diagnostic_fires: u64,
+     /// Number of frames between fires. Apple's CADisplayLink documentation
+     /// describes `frameInterval` as the number of frames that must pass
+     /// before the display link notifies the target again; the default is 1
+@@ -81,7 +82,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+     host_object.target = target;
+     host_object.selector = Some(sel);
+     host_object.ns_timer = ns_timer;
+-    log_dbg!("[CADisplayLink displayLinkWithTarget:{:?} selector:{}] => {:?}", target, sel.as_str(&env.mem), display_link);
++    log!("[CADisplayLink displayLinkWithTarget:{:?} selector:{}] => {:?}", target, sel.as_str(&env.mem), display_link);
+     autorelease(env, display_link)
+ }
+ 
+@@ -89,7 +90,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+     env.objc.borrow::<CADisplayLinkHostObject>(this).paused
+ }
+ - (())setPaused:(bool)paused {
+-    log_dbg!("[(CADisplayLink*){:?} setPaused:{}]", this, paused);
++    log!("[(CADisplayLink*){:?} setPaused:{}]", this, paused);
+     env.objc.borrow_mut::<CADisplayLinkHostObject>(this).paused = paused;
+ }
+ 
+@@ -127,7 +128,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+ }
+ 
+ - (())setFrameInterval:(NSInteger)frameInterval {
+-    log_dbg!("[(CADisplayLink*){:?} setFrameInterval:{}]", this, frameInterval);
++    log!("[(CADisplayLink*){:?} setFrameInterval:{}]", this, frameInterval);
+     // Apple docs state the value must be >= 1; clamp to keep guests alive
+     // rather than raising NSInvalidArgumentException.
+     let safe_interval = frameInterval.max(1);
+@@ -158,7 +159,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+ // link."
+ // <https://developer.apple.com/documentation/quartzcore/cadisplaylink/add(to:formode:)>
+ - (())addToRunLoop:(id)run_loop forMode:(NSRunLoopMode)mode {
+-    log_dbg!("[(CADisplayLink*){:?} addToRunLoop:{:?} forMode:{:?}]", this, run_loop, mode);
++    log!("[(CADisplayLink*){:?} addToRunLoop:{:?} forMode:{:?}]", this, run_loop, mode);
+     let ns_timer = env.objc.borrow::<CADisplayLinkHostObject>(this).ns_timer;
+     if ns_timer != nil {
+         () = msg![env; run_loop addTimer:ns_timer forMode:mode];
+@@ -170,7 +171,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+ // of a run loop. To stop all firing, call `invalidate`.
+ // <https://developer.apple.com/documentation/quartzcore/cadisplaylink/remove(from:formode:)>
+ - (())removeFromRunLoop:(id)run_loop forMode:(NSRunLoopMode)_mode {
+-    log_dbg!("[(CADisplayLink*){:?} removeFromRunLoop:{:?} forMode:{:?}]", this, run_loop, _mode);
++    log!("[(CADisplayLink*){:?} removeFromRunLoop:{:?} forMode:{:?}]", this, run_loop, _mode);
+     // NSTimer does not expose a per-mode remove API; invalidating stops all
+     // firing.  We mirror Apple's documented behaviour: if the caller later
+     // calls addToRunLoop:forMode: for a different mode without invalidating
+@@ -187,7 +188,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+ // After calling this method, the display link will not fire again.
+ // <https://developer.apple.com/documentation/quartzcore/cadisplaylink/invalidate()>
+ - (())invalidate {
+-    log_dbg!("[(CADisplayLink*){:?} invalidate]", this);
++    log!("[(CADisplayLink*){:?} invalidate]", this);
+     let ns_timer = env.objc.borrow::<CADisplayLinkHostObject>(this).ns_timer;
+     () = msg![env; ns_timer invalidate];
+ }
+@@ -211,6 +212,17 @@ pub const CLASSES: ClassExports = objc_classes! {
+         ..
+     } = env.objc.borrow::<CADisplayLinkHostObject>(this);
+     assert_eq!(ns_timer, timer);
++    let fire = {
++        let host = env.objc.borrow_mut::<CADisplayLinkHostObject>(this);
++        host.diagnostic_fires = host.diagnostic_fires.saturating_add(1);
++        host.diagnostic_fires
++    };
++    let trace = fire <= 3 || matches!(fire, 60 | 300 | 1800);
++    if trace {
++        log!("[STARTUP TRACE v2] display link {:?} fire={} paused={} target={:?} selector={} thread={:?}",
++            this, fire, paused, target, selector.unwrap().as_str(&env.mem), env.current_thread);
++    }
++
+     if paused {
+         // This could be improved, as we're still running the timer,
+         // but just not passing the actual call.
+@@ -218,6 +230,10 @@ pub const CLASSES: ClassExports = objc_classes! {
+     }
+     // Signature is `- (void) selector:(CADisplayLink *)sender;`
+     () = msg_send(env, (target, selector.unwrap(), this));
++    if trace {
++        log!("[STARTUP TRACE v2] display link {:?} fire={} callback returned", this, fire);
++    }
++
+ }
+ 
+ @end
+diff --git a/src/frameworks/foundation/ns_timer.rs b/src/frameworks/foundation/ns_timer.rs
+index 0c4cee30..fa967555 100644
+--- a/src/frameworks/foundation/ns_timer.rs
++++ b/src/frameworks/foundation/ns_timer.rs
+@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
+ 
+ #[derive(Default)]
+ struct NSTimerHostObject {
++    diagnostic_fires: u64,
+     ns_interval: NSTimeInterval,
+     /// Copy of `ns_interval` in Rust's type for time intervals. Keep in sync!
+     rust_interval: Duration,
+@@ -70,6 +71,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+         .checked_add(rust_interval)
+         .unwrap_or_else(Instant::now);
+     let host_object = Box::new(NSTimerHostObject {
++        diagnostic_fires: 0,
+         ns_interval,
+         rust_interval,
+         target,
+@@ -134,6 +136,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+         .checked_add(rust_interval)
+         .unwrap_or_else(Instant::now);
+     let host_object = Box::new(NSTimerHostObject {
++        diagnostic_fires: 0,
+         ns_interval,
+         rust_interval,
+         target: nil,
+@@ -439,6 +442,18 @@ pub(super) fn handle_timer(env: &mut Environment, timer: id) -> Option<Instant>
+         .is_running_callback = true;
+ 
+     log_once!("First NSTimer fired (run loop is delivering scheduled events)");
++    let fire = {
++        let host = env.objc.borrow_mut::<NSTimerHostObject>(timer);
++        host.diagnostic_fires = host.diagnostic_fires.saturating_add(1);
++        host.diagnostic_fires
++    };
++    let trace = fire <= 3 || matches!(fire, 60 | 300 | 1800);
++    if trace {
++        let selector_name = if invocation != nil { "<invocation>" } else { selector.as_str(&env.mem) };
++        log!("[STARTUP TRACE v2] timer {:?} fire={} ENTER target={:?} selector={} thread={:?}",
++            timer, fire, target, selector_name, env.current_thread);
++    }
++
+ 
+     log_dbg!(
+         "Timer {:?} fired, sending {:?} message to {:?}",
+@@ -453,7 +468,13 @@ pub(super) fn handle_timer(env: &mut Environment, timer: id) -> Option<Instant>
+     } else {
+         let _: () = msg_send(env, (target, selector, timer));
+     }
++    if trace {
++        log!("[STARTUP TRACE v2] timer {:?} fire={} callback returned", timer, fire);
++    }
+     release(env, pool);
++    if trace {
++        log!("[STARTUP TRACE v2] timer {:?} fire={} pool drained", timer, fire);
++    }
+ 
+     env.objc
+         .borrow_mut::<NSTimerHostObject>(timer)
+diff --git a/src/frameworks/game_kit/gk_local_player.rs b/src/frameworks/game_kit/gk_local_player.rs
+index 19ab8bc9..c3c6dba6 100644
+--- a/src/frameworks/game_kit/gk_local_player.rs
++++ b/src/frameworks/game_kit/gk_local_player.rs
+@@ -208,7 +208,9 @@ pub const CLASSES: ClassExports = objc_classes! {
+ + (())setDefaultLeaderboardIdentifier:(id)_identifier
+                withCompletionHandler:(id)handler {
+     let error = make_not_authenticated_error(env);
++    log!("[STARTUP TRACE v2] Game Center invoking completion");
+     invoke_error_block(env, handler, error);
++    log!("[STARTUP TRACE v2] Game Center completion returned");
+ }
+ 
+ // Apple reference (iOS 7+):
+@@ -301,6 +303,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+ // deferred delegate callbacks, so it fires on the next run-loop turn on the
+ // main thread.
+ - (())authenticateWithCompletionHandler:(id)completion_handler {
++    log!("[STARTUP TRACE v2] Game Center authentication requested handler={:?}", completion_handler);
+     if completion_handler == nil {
+         // Still post the notification, mirroring GameKit's ordering.
+         post_auth_change_notification(env);
+@@ -332,6 +335,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+ // match GameKit's documented ordering, then invokes the block and releases
+ // our retained reference.
+ - (())_touchHLE_deliverAuthCompletion {
++    log!("[STARTUP TRACE v2] Game Center deferred completion entered");
+     let handler = {
+         let host = env.objc.borrow_mut::<GKLocalPlayerHostObject>(this);
+         let h = host.pending_completion_handler;
+@@ -345,7 +349,9 @@ pub const CLASSES: ClassExports = objc_classes! {
+     post_auth_change_notification(env);
+ 
+     let error = make_not_authenticated_error(env);
++    log!("[STARTUP TRACE v2] Game Center invoking completion");
+     invoke_error_block(env, handler, error);
++    log!("[STARTUP TRACE v2] Game Center completion returned");
+     release(env, handler);
+ }
+ 
 diff --git a/src/frameworks/opengles/eagl.rs b/src/frameworks/opengles/eagl.rs
-index b18a0d6c..c6c06199 100644
+index b18a0d6c..aa08ba7f 100644
 --- a/src/frameworks/opengles/eagl.rs
 +++ b/src/frameworks/opengles/eagl.rs
 @@ -95,6 +95,7 @@ pub(super) struct EAGLContextHostObject {
@@ -33,7 +229,15 @@ index b18a0d6c..c6c06199 100644
      for &(guest_buf, _host_buf) in host_obj.mapped_buffers.values() {
          env.mem.free(guest_buf);
      }
-@@ -646,13 +652,39 @@ pub const CLASSES: ClassExports = objc_classes! {
+@@ -565,6 +571,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+ }
+ 
+ - (bool)presentRenderbuffer:(NSUInteger)target {
++    log_once!("[STARTUP TRACE v2] presentRenderbuffer entered before event polling");
+     // Some games (e.g. Angry Birds 1.0) run their main loop without going
+     // through the NSRunLoop, so handle_events() in the run loop never fires.
+     // Poll and dispatch pending input events here, at the natural per-frame
+@@ -646,13 +653,39 @@ pub const CLASSES: ClassExports = objc_classes! {
  
      std::mem::drop(gles);
  
@@ -80,7 +284,7 @@ index b18a0d6c..c6c06199 100644
          return false;
      };
  
-@@ -677,7 +709,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+@@ -677,7 +710,7 @@ pub const CLASSES: ClassExports = objc_classes! {
          );
          // re-borrow
          unsafe {
@@ -89,7 +293,7 @@ index b18a0d6c..c6c06199 100644
          }
      } else {
          if fullscreen_layer != nil {
-@@ -717,7 +749,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+@@ -717,7 +750,7 @@ pub const CLASSES: ClassExports = objc_classes! {
                  env.current_thread,
              );
              match maybe_gles {
@@ -98,7 +302,7 @@ index b18a0d6c..c6c06199 100644
                  None => {
                      log!(
                          "[EAGLContext presentRenderbuffer:{:#x}] lost GL \
-@@ -883,6 +915,17 @@ unsafe fn get_renderbuffer_size(gles: &mut dyn GLES) -> (GLsizei, GLsizei) {
+@@ -883,6 +916,17 @@ unsafe fn get_renderbuffer_size(gles: &mut dyn GLES) -> (GLsizei, GLsizei) {
      (width, height)
  }
  
@@ -116,7 +320,7 @@ index b18a0d6c..c6c06199 100644
  /// Copies the pixels in a renderbuffer bound to `GL_RENDERBUFFER_BINDING_OES`
  /// (which should be provided by the app) to a provided [Vec], trying to avoid
  /// noticeably modifying OpenGL ES state while doing so.
-@@ -892,9 +935,8 @@ unsafe fn get_renderbuffer_size(gles: &mut dyn GLES) -> (GLsizei, GLsizei) {
+@@ -892,9 +936,8 @@ unsafe fn get_renderbuffer_size(gles: &mut dyn GLES) -> (GLsizei, GLsizei) {
  /// The returned values are the [Vec], the width and height.
  ///
  /// The provided context must be current.
@@ -128,7 +332,7 @@ index b18a0d6c..c6c06199 100644
      let width_u32: u32 = width.try_into().unwrap();
      let height_u32: u32 = height.try_into().unwrap();
  
-@@ -966,6 +1008,7 @@ unsafe fn read_renderbuffer(gles: &mut dyn GLES, mut pixel_buffer: Vec<u8>) -> (
+@@ -966,6 +1009,7 @@ unsafe fn read_renderbuffer(gles: &mut dyn GLES, mut pixel_buffer: Vec<u8>) -> (
  /// etc. are not part of ES 2.0 state and thus need no save/restore.
  unsafe fn present_renderbuffer_es2(
      gles: &mut dyn GLES,
@@ -136,7 +340,7 @@ index b18a0d6c..c6c06199 100644
      drawable_framebuffer: GLuint,
      viewport: (u32, u32, u32, u32),
      rotation_matrix: crate::matrix::Matrix<2>,
-@@ -998,6 +1041,8 @@ unsafe fn present_renderbuffer_es2(
+@@ -998,6 +1042,8 @@ unsafe fn present_renderbuffer_es2(
      let cull_was_on = gles.IsEnabled(gles2::CULL_FACE) != 0;
      let blend_was_on = gles.IsEnabled(gles2::BLEND) != 0;
      let scissor_was_on = gles.IsEnabled(gles2::SCISSOR_TEST) != 0;
@@ -145,7 +349,7 @@ index b18a0d6c..c6c06199 100644
  
      let present_attribs = [6u32, 7u32];
      let mut attrib_enabled = [0i32; 2];
-@@ -1019,15 +1064,7 @@ unsafe fn present_renderbuffer_es2(
+@@ -1019,15 +1065,7 @@ unsafe fn present_renderbuffer_es2(
  
      // Resolve renderbuffer → texture with a cached FBO + `glCopyTexImage2D`,
      // using the ES 2.0 entry points.
@@ -162,7 +366,7 @@ index b18a0d6c..c6c06199 100644
  
      let present_objects = ensure_present_objects(gles);
      gles.BindFramebuffer(gles2::FRAMEBUFFER, present_objects.framebuffer);
-@@ -1084,6 +1121,19 @@ unsafe fn present_renderbuffer_es2(
+@@ -1084,6 +1122,19 @@ unsafe fn present_renderbuffer_es2(
                  gles2::UNSIGNED_BYTE,
                  pixels.as_mut_ptr().cast(),
              );
@@ -182,7 +386,7 @@ index b18a0d6c..c6c06199 100644
              gles.TexImage2D(
                  gles2::TEXTURE_2D,
                  0,
-@@ -1342,17 +1392,38 @@ struct PresentObjects {
+@@ -1342,17 +1393,38 @@ struct PresentObjects {
  }
  
  thread_local! {
@@ -226,7 +430,7 @@ index b18a0d6c..c6c06199 100644
          return Some(p);
      }
  
-@@ -1452,7 +1523,7 @@ unsafe fn ensure_present_program(gles: &mut dyn GLES) -> Option<PresentProgram>
+@@ -1452,7 +1524,7 @@ unsafe fn ensure_present_program(gles: &mut dyn GLES) -> Option<PresentProgram>
          u_tex,
          u_tex_mat,
      };
@@ -235,7 +439,7 @@ index b18a0d6c..c6c06199 100644
      Some(result)
  }
  
-@@ -1469,7 +1540,8 @@ unsafe fn ensure_present_program(gles: &mut dyn GLES) -> Option<PresentProgram>
+@@ -1469,7 +1541,8 @@ unsafe fn ensure_present_program(gles: &mut dyn GLES) -> Option<PresentProgram>
  /// v-sync and never does this churn. Caching the objects per thread and reusing
  /// them every frame removes that churn entirely.
  unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
@@ -245,7 +449,7 @@ index b18a0d6c..c6c06199 100644
          return o;
      }
  
-@@ -1507,7 +1579,7 @@ unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
+@@ -1507,7 +1580,7 @@ unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
          texture,
          quad_vbo,
      };
@@ -254,7 +458,7 @@ index b18a0d6c..c6c06199 100644
      result
  }
  
-@@ -1515,7 +1587,7 @@ unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
+@@ -1515,7 +1588,7 @@ unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
  /// (which should be provided by the app) to a texture and presents it with
  /// [present_frame], trying to avoid noticeably modifying OpenGL ES state while
  /// doing so. The front and back buffers are then swapped.
@@ -263,7 +467,7 @@ index b18a0d6c..c6c06199 100644
      // Capture this up front because the env borrow is moved into the GL
      // context machinery below.
      let trace_gl_errors = env.options.trace_gl_errors;
-@@ -1585,6 +1657,10 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
+@@ -1585,6 +1658,10 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
          .objc
          .borrow::<EAGLContextHostObject>(context)
          .drawable_framebuffer;
@@ -274,7 +478,7 @@ index b18a0d6c..c6c06199 100644
  
      let Some(gles_ctx) = super::get_thread_context(
          &mut env.framework_state.opengles,
-@@ -1667,8 +1743,10 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
+@@ -1667,8 +1744,10 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
      // glEnableClientState / glVertexPointer. Use a small dedicated
      // shader-based presenter instead.
      if gles.is_es2() {
@@ -285,7 +489,7 @@ index b18a0d6c..c6c06199 100644
              drawable_framebuffer,
              viewport,
              rotation_matrix,
-@@ -1685,8 +1763,7 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
+@@ -1685,8 +1764,7 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
      // draw to the default framebuffer via a textured quad, which can be
      // rotated, scaled or letterboxed as appropriate.
  
@@ -296,10 +500,36 @@ index b18a0d6c..c6c06199 100644
          static SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
  
 diff --git a/src/frameworks/opengles/gles_guest.rs b/src/frameworks/opengles/gles_guest.rs
-index 82dd625b..7783bbca 100644
+index 82dd625b..f595110a 100644
 --- a/src/frameworks/opengles/gles_guest.rs
 +++ b/src/frameworks/opengles/gles_guest.rs
-@@ -5136,6 +5136,12 @@ fn glProgramParameteri(env: &mut Environment, program: GLuint, pname: GLenum, va
+@@ -1365,6 +1365,12 @@ unsafe fn guard_client_vertex_arrays(gles: &mut dyn GLES, mem: &Mem) -> Vec<GLui
+ }
+ 
+ fn glDrawArrays(env: &mut Environment, mode: GLenum, first: GLint, count: GLsizei) {
++    if count > 0 {
++        static NONEMPTY: std::sync::Once = std::sync::Once::new();
++        NONEMPTY.call_once(|| {
++            log!("[STARTUP TRACE v2] glDrawArrays first nonempty draw count={}", count);
++        });
++    }
+     {
+         use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+         static SEEN: AtomicBool = AtomicBool::new(false);
+@@ -1421,6 +1427,12 @@ fn glDrawElements(
+     type_: GLenum,
+     indices: ConstVoidPtr,
+ ) {
++    if count > 0 {
++        static NONEMPTY: std::sync::Once = std::sync::Once::new();
++        NONEMPTY.call_once(|| {
++            log!("[STARTUP TRACE v2] glDrawElements first nonempty draw count={}", count);
++        });
++    }
+     {
+         use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+         static SEEN: AtomicBool = AtomicBool::new(false);
+@@ -5136,6 +5148,12 @@ fn glProgramParameteri(env: &mut Environment, program: GLuint, pname: GLenum, va
  }
  
  unsafe fn clamp_fog_state_values(gles: &mut dyn GLES) -> Option<(f32, f32)> {
