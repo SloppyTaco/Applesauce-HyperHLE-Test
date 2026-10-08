@@ -1,0 +1,308 @@
+diff --git a/src/frameworks/opengles/eagl.rs b/src/frameworks/opengles/eagl.rs
+index b18a0d6c..7b074808 100644
+--- a/src/frameworks/opengles/eagl.rs
++++ b/src/frameworks/opengles/eagl.rs
+@@ -95,6 +95,7 @@ pub(super) struct EAGLContextHostObject {
+     /// path saves and restores state.
+     pub(super) api: EAGLRenderingAPI,
+     drawable_framebuffer: GLuint,
++    present_cache_token: u64,
+     /// Mapping of OpenGL ES renderbuffer names to `EAGLDrawable` instances
+     /// (always `CAEAGLLayer*`). Retains the instance so it won't dangle.
+     renderbuffer_drawable_bindings: Rc<RefCell<HashMap<GLuint, id>>>,
+@@ -111,10 +112,14 @@ pub const CLASSES: ClassExports = objc_classes! {
+ @implementation EAGLContext: NSObject
+ 
+ + (id)alloc {
++    static NEXT_PRESENT_TOKEN: std::sync::atomic::AtomicU64 =
++        std::sync::atomic::AtomicU64::new(1);
+     let host_object = Box::new(EAGLContextHostObject {
+         gles_ctx: None,
+         api: kEAGLRenderingAPIOpenGLES1,
+         drawable_framebuffer: 0,
++        present_cache_token: NEXT_PRESENT_TOKEN.fetch_add(
++            1, std::sync::atomic::Ordering::Relaxed),
+         renderbuffer_drawable_bindings: Rc::new(RefCell::new(HashMap::new())),
+         fps_counter: None,
+         next_frame_due: None,
+@@ -259,6 +264,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+ 
+ - (())dealloc {
+     let host_obj = env.objc.borrow_mut::<EAGLContextHostObject>(this);
++    forget_present_cache(host_obj.present_cache_token);
+     for &(guest_buf, _host_buf) in host_obj.mapped_buffers.values() {
+         env.mem.free(guest_buf);
+     }
+@@ -646,13 +652,33 @@ pub const CLASSES: ClassExports = objc_classes! {
+ 
+     std::mem::drop(gles);
+ 
+-    let Some(&drawable) = env
+-        .objc
+-        .borrow::<EAGLContextHostObject>(this)
+-        .renderbuffer_drawable_bindings
+-        .borrow()
+-        .get(&renderbuffer) else {
+-        log_dbg!("Can't present a renderbuffer {:?} not bound to a drawable!", renderbuffer);
++    // Newer HyperHLE recovers this mismatch when there is only one drawable.
++    // Carry the recovered renderbuffer through the entire copy, not just its
++    // drawable: the current binding may refer to a depth or offscreen buffer.
++    let presentation = {
++        let context = env.objc.borrow::<EAGLContextHostObject>(this);
++        let bindings = context.renderbuffer_drawable_bindings.borrow();
++        if let Some(&drawable) = bindings.get(&renderbuffer) {
++            Some((renderbuffer, drawable))
++        } else if bindings.len() == 1 {
++            let (&bound_renderbuffer, &drawable) = bindings.iter().next().unwrap();
++            log_once!(
++                "EAGL present binding mismatch: current={}, drawable renderbuffer={}; using the drawable renderbuffer.",
++                renderbuffer, bound_renderbuffer
++            );
++            Some((bound_renderbuffer, drawable))
++        } else {
++            log_once!(
++                "EAGL present skipped: renderbuffer {} has no drawable ({} registered).",
++                renderbuffer, bindings.len()
++            );
++            None
++        }
++    };
++    let Some((renderbuffer, drawable)) = presentation else {
++        if let Some(sleep_for) = sleep_for {
++            env.sleep(sleep_for);
++        }
+         return false;
+     };
+ 
+@@ -677,7 +703,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+         );
+         // re-borrow
+         unsafe {
+-            present_renderbuffer(env, this);
++            present_renderbuffer(env, this, renderbuffer);
+         }
+     } else {
+         if fullscreen_layer != nil {
+@@ -717,7 +743,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+                 env.current_thread,
+             );
+             match maybe_gles {
+-                Some(mut gles) => Some(unsafe { read_renderbuffer(gles.as_mut(), pixels_vec) }),
++                Some(mut gles) => Some(unsafe { read_renderbuffer(gles.as_mut(), renderbuffer, pixels_vec) }),
+                 None => {
+                     log!(
+                         "[EAGLContext presentRenderbuffer:{:#x}] lost GL \
+@@ -883,6 +909,17 @@ unsafe fn get_renderbuffer_size(gles: &mut dyn GLES) -> (GLsizei, GLsizei) {
+     (width, height)
+ }
+ 
++unsafe fn get_presented_renderbuffer_size(
++    gles: &mut dyn GLES,
++    renderbuffer: GLuint,
++) -> (GLsizei, GLsizei) {
++    let old_renderbuffer = get_int(gles, gles11::RENDERBUFFER_BINDING_OES) as GLuint;
++    gles.BindRenderbufferOES(gles11::RENDERBUFFER_OES, renderbuffer);
++    let size = get_renderbuffer_size(gles);
++    gles.BindRenderbufferOES(gles11::RENDERBUFFER_OES, old_renderbuffer);
++    size
++}
++
+ /// Copies the pixels in a renderbuffer bound to `GL_RENDERBUFFER_BINDING_OES`
+ /// (which should be provided by the app) to a provided [Vec], trying to avoid
+ /// noticeably modifying OpenGL ES state while doing so.
+@@ -892,9 +929,8 @@ unsafe fn get_renderbuffer_size(gles: &mut dyn GLES) -> (GLsizei, GLsizei) {
+ /// The returned values are the [Vec], the width and height.
+ ///
+ /// The provided context must be current.
+-unsafe fn read_renderbuffer(gles: &mut dyn GLES, mut pixel_buffer: Vec<u8>) -> (Vec<u8>, u32, u32) {
+-    let renderbuffer: GLuint = get_int(gles, gles11::RENDERBUFFER_BINDING_OES) as _;
+-    let (width, height) = get_renderbuffer_size(gles);
++unsafe fn read_renderbuffer(gles: &mut dyn GLES, renderbuffer: GLuint, mut pixel_buffer: Vec<u8>) -> (Vec<u8>, u32, u32) {
++    let (width, height) = get_presented_renderbuffer_size(gles, renderbuffer);
+     let width_u32: u32 = width.try_into().unwrap();
+     let height_u32: u32 = height.try_into().unwrap();
+ 
+@@ -966,6 +1002,7 @@ unsafe fn read_renderbuffer(gles: &mut dyn GLES, mut pixel_buffer: Vec<u8>) -> (
+ /// etc. are not part of ES 2.0 state and thus need no save/restore.
+ unsafe fn present_renderbuffer_es2(
+     gles: &mut dyn GLES,
++    renderbuffer: GLuint,
+     drawable_framebuffer: GLuint,
+     viewport: (u32, u32, u32, u32),
+     rotation_matrix: crate::matrix::Matrix<2>,
+@@ -998,6 +1035,8 @@ unsafe fn present_renderbuffer_es2(
+     let cull_was_on = gles.IsEnabled(gles2::CULL_FACE) != 0;
+     let blend_was_on = gles.IsEnabled(gles2::BLEND) != 0;
+     let scissor_was_on = gles.IsEnabled(gles2::SCISSOR_TEST) != 0;
++    // Isolate the copy from the guest's clipping state as in newer HyperHLE.
++    gles.Disable(gles2::SCISSOR_TEST);
+ 
+     let present_attribs = [6u32, 7u32];
+     let mut attrib_enabled = [0i32; 2];
+@@ -1019,15 +1058,7 @@ unsafe fn present_renderbuffer_es2(
+ 
+     // Resolve renderbuffer → texture with a cached FBO + `glCopyTexImage2D`,
+     // using the ES 2.0 entry points.
+-    let mut renderbuffer: GLint = 0;
+-    gles.GetIntegerv(gles2::RENDERBUFFER_BINDING, &mut renderbuffer);
+-    let (width, height) = {
+-        let mut w: GLint = 0;
+-        let mut h: GLint = 0;
+-        gles.GetRenderbufferParameteriv(gles2::RENDERBUFFER, gles2::RENDERBUFFER_WIDTH, &mut w);
+-        gles.GetRenderbufferParameteriv(gles2::RENDERBUFFER, gles2::RENDERBUFFER_HEIGHT, &mut h);
+-        (w, h)
+-    };
++    let (width, height) = get_presented_renderbuffer_size(gles, renderbuffer);
+ 
+     let present_objects = ensure_present_objects(gles);
+     gles.BindFramebuffer(gles2::FRAMEBUFFER, present_objects.framebuffer);
+@@ -1084,6 +1115,19 @@ unsafe fn present_renderbuffer_es2(
+                 gles2::UNSIGNED_BYTE,
+                 pixels.as_mut_ptr().cast(),
+             );
++            let frame = PRESENT_DIAGNOSTIC_FRAME.with(|counter| {
++                let next = counter.get() + 1;
++                counter.set(next);
++                next
++            });
++            if matches!(frame, 1 | 60 | 300) {
++                let rgb_max = pixels.chunks_exact(4)
++                    .flat_map(|pixel| pixel[..3].iter()).copied().max().unwrap_or(0);
++                log!(
++                    "HLE Test ES2 source: frame={} renderbuffer={} size={}x{} framebuffer_status=0x{:x} rgb_max={}",
++                    frame, renderbuffer, width, height, source_framebuffer_status, rgb_max
++                );
++            }
+             gles.TexImage2D(
+                 gles2::TEXTURE_2D,
+                 0,
+@@ -1342,17 +1386,38 @@ struct PresentObjects {
+ }
+ 
+ thread_local! {
+-    static PRESENT_PROGRAM: std::cell::Cell<Option<PresentProgram>> =
+-        const { std::cell::Cell::new(None) };
+-    static PRESENT_OBJECTS: std::cell::Cell<Option<PresentObjects>> =
+-        const { std::cell::Cell::new(None) };
++    static PRESENT_CACHE_TOKEN: std::cell::Cell<u64> =
++        const { std::cell::Cell::new(0) };
++    static PRESENT_DIAGNOSTIC_FRAME: std::cell::Cell<u64> =
++        const { std::cell::Cell::new(0) };
++    static PRESENT_PROGRAM: RefCell<HashMap<u64, PresentProgram>> =
++        RefCell::new(HashMap::new());
++    static PRESENT_OBJECTS: RefCell<HashMap<u64, PresentObjects>> =
++        RefCell::new(HashMap::new());
+     static IOS_PRESENT_PIXELS: std::cell::RefCell<Vec<u8>> =
+         const { std::cell::RefCell::new(Vec::new()) };
+ }
+ 
++fn reset_present_cache_for_context(token: u64) {
++    PRESENT_CACHE_TOKEN.with(|current| {
++        if current.replace(token) != token {
++            PRESENT_DIAGNOSTIC_FRAME.with(|counter| counter.set(0));
++        }
++    });
++}
++
++fn forget_present_cache(token: u64) {
++    // Context destruction releases its GL objects. Keep caches keyed by a
++    // unique lifetime token so switching live contexts neither reuses foreign
++    // names nor allocates new objects on every switch.
++    PRESENT_PROGRAM.with(|cache| cache.borrow_mut().remove(&token));
++    PRESENT_OBJECTS.with(|cache| cache.borrow_mut().remove(&token));
++}
++
+ unsafe fn ensure_present_program(gles: &mut dyn GLES) -> Option<PresentProgram> {
+     use crate::gles::gles2_raw as gles2;
+-    if let Some(p) = PRESENT_PROGRAM.with(|c| c.get()) {
++    let token = PRESENT_CACHE_TOKEN.with(|current| current.get());
++    if let Some(p) = PRESENT_PROGRAM.with(|c| c.borrow().get(&token).copied()) {
+         return Some(p);
+     }
+ 
+@@ -1452,7 +1517,7 @@ unsafe fn ensure_present_program(gles: &mut dyn GLES) -> Option<PresentProgram>
+         u_tex,
+         u_tex_mat,
+     };
+-    PRESENT_PROGRAM.with(|c| c.set(Some(result)));
++    PRESENT_PROGRAM.with(|c| c.borrow_mut().insert(token, result));
+     Some(result)
+ }
+ 
+@@ -1469,7 +1534,8 @@ unsafe fn ensure_present_program(gles: &mut dyn GLES) -> Option<PresentProgram>
+ /// v-sync and never does this churn. Caching the objects per thread and reusing
+ /// them every frame removes that churn entirely.
+ unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
+-    if let Some(o) = PRESENT_OBJECTS.with(|c| c.get()) {
++    let token = PRESENT_CACHE_TOKEN.with(|current| current.get());
++    if let Some(o) = PRESENT_OBJECTS.with(|c| c.borrow().get(&token).copied()) {
+         return o;
+     }
+ 
+@@ -1507,7 +1573,7 @@ unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
+         texture,
+         quad_vbo,
+     };
+-    PRESENT_OBJECTS.with(|c| c.set(Some(result)));
++    PRESENT_OBJECTS.with(|c| c.borrow_mut().insert(token, result));
+     result
+ }
+ 
+@@ -1515,7 +1581,7 @@ unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
+ /// (which should be provided by the app) to a texture and presents it with
+ /// [present_frame], trying to avoid noticeably modifying OpenGL ES state while
+ /// doing so. The front and back buffers are then swapped.
+-unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
++unsafe fn present_renderbuffer(env: &mut Environment, context: id, renderbuffer: GLuint) {
+     // Capture this up front because the env borrow is moved into the GL
+     // context machinery below.
+     let trace_gl_errors = env.options.trace_gl_errors;
+@@ -1585,6 +1651,10 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
+         .objc
+         .borrow::<EAGLContextHostObject>(context)
+         .drawable_framebuffer;
++    let present_cache_token = env
++        .objc
++        .borrow::<EAGLContextHostObject>(context)
++        .present_cache_token;
+ 
+     let Some(gles_ctx) = super::get_thread_context(
+         &mut env.framework_state.opengles,
+@@ -1667,8 +1737,10 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
+     // glEnableClientState / glVertexPointer. Use a small dedicated
+     // shader-based presenter instead.
+     if gles.is_es2() {
++        reset_present_cache_for_context(present_cache_token);
+         present_renderbuffer_es2(
+             gles,
++            renderbuffer,
+             drawable_framebuffer,
+             viewport,
+             rotation_matrix,
+@@ -1685,8 +1757,7 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
+     // draw to the default framebuffer via a textured quad, which can be
+     // rotated, scaled or letterboxed as appropriate.
+ 
+-    let renderbuffer: GLuint = get_int(gles, gles11::RENDERBUFFER_BINDING_OES) as _;
+-    let (width, height) = get_renderbuffer_size(gles);
++    let (width, height) = get_presented_renderbuffer_size(gles, renderbuffer);
+     {
+         static SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+ 
+diff --git a/src/frameworks/opengles/gles_guest.rs b/src/frameworks/opengles/gles_guest.rs
+index 82dd625b..7783bbca 100644
+--- a/src/frameworks/opengles/gles_guest.rs
++++ b/src/frameworks/opengles/gles_guest.rs
+@@ -5136,6 +5136,12 @@ fn glProgramParameteri(env: &mut Environment, program: GLuint, pname: GLenum, va
+ }
+ 
+ unsafe fn clamp_fog_state_values(gles: &mut dyn GLES) -> Option<(f32, f32)> {
++    // Native GLES2/3 has no fixed-function fog state. Querying GL_FOG here
++    // raises GL_INVALID_ENUM before every draw and poisons the guest queue.
++    // Keep the workaround only on backends that implement fixed-function GL.
++    if gles.is_es2() {
++        return None;
++    }
+     let mut fog_enabled: GLboolean = 0;
+     gles.GetBooleanv(gles11::FOG, &mut fog_enabled);
+     if fog_enabled != 0 {

@@ -1,16 +1,31 @@
-name: Build Applesauce with HyperHLE trunk
+name: Build Applesauce rendering test
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - '.github/workflows/build-applesauce-hyperhle-trunk.yml'
+      - 'patches/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: applesauce-rendering-test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APPLESAUCE_REF: c75278bda86c80cbcec2d8d1493b5be9d5a9e0d1
+  TEST_BUNDLE_ID: io.github.sloppytaco.applesaucehyperhletest
 
 jobs:
   build:
     runs-on: macos-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout build repo
@@ -18,160 +33,99 @@ jobs:
 
       - name: Show toolchain
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           sw_vers
           xcodebuild -version
-          xcode-select -p
           rustc --version
           cargo --version
 
       - name: Install build dependencies
         run: |
-          set -euxo pipefail
-          brew install cmake ninja boost python || true
+          set -euo pipefail
+          brew install cmake ninja boost ldid
           rustup target add aarch64-apple-ios
 
-      - name: Clone latest HyperHLE
+      - name: Checkout working Applesauce iOS source
         run: |
-          set -euxo pipefail
-          git clone --branch trunk https://github.com/KlugKlugTG/HyperHLE-Fork.git applesauce
-          cd applesauce
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git submodule update --init vendor/dynarmic
-          echo "HyperHLE trunk: $(git rev-parse HEAD)"
+          set -euo pipefail
+          git clone --branch ios-host https://github.com/johnny901901901/Applesauce.git applesauce
+          git -C applesauce checkout --detach "$APPLESAUCE_REF"
+          git -C applesauce submodule update --init --recursive
 
-      - name: Forward-port the Applesauce iOS changes
+      - name: Apply reviewed graphics backport
         run: |
-          set -euxo pipefail
-          cd applesauce
-          git remote add applesauce-port https://github.com/johnny901901901/Applesauce.git
-          git fetch applesauce-port ios-host
-
-          # Applesauce branched from HyperHLE immediately after this commit.
-          # Replay only the iOS-port commits on top of today's HyperHLE rather
-          # than merging two diverged emulator trees wholesale.
-          IOS_BASE=72cb2795eb5b8b215a7e29af0cda152822a12355
-          COMMITS=$(git rev-list --reverse "$IOS_BASE"..applesauce-port/ios-host)
-          echo "Forward-porting $(printf '%s\n' "$COMMITS" | sed '/^$/d' | wc -l | tr -d ' ') Applesauce commits"
-
-          for commit in $COMMITS; do
-            echo "===== cherry-pick $commit ====="
-            if ! git cherry-pick -X theirs "$commit"; then
-              echo "Cherry-pick stopped on $commit"
-              git status --short
-
-              # Keep the modern HyperHLE Dynarmic revision if the historical
-              # iOS commit tries to move the submodule pointer backwards.
-              if git diff --name-only --diff-filter=U | grep -qx 'vendor/dynarmic'; then
-                git checkout --ours vendor/dynarmic
-                git add vendor/dynarmic
-              fi
-
-              # Cargo.lock is generated; preserve the modern lockfile on a
-              # textual conflict and let Cargo update it for the iOS entry crate.
-              if git diff --name-only --diff-filter=U | grep -qx 'Cargo.lock'; then
-                git checkout --ours Cargo.lock
-                git add Cargo.lock
-              fi
-
-              # Documentation conflicts do not affect the test binary.
-              for f in README.md .github/ISSUE_TEMPLATE/config.yml; do
-                if git diff --name-only --diff-filter=U | grep -qx "$f"; then
-                  git checkout --theirs "$f"
-                  git add "$f"
-                fi
-              done
-
-              # If anything real is still unresolved, stop and expose it in logs.
-              if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
-                echo '----- UNRESOLVED FILES -----'
-                git diff --name-only --diff-filter=U
-                exit 1
-              fi
-
-              git cherry-pick --continue
-            fi
-          done
-
-          echo "Forward-ported tree: $(git rev-parse HEAD)"
-
-      - name: Ensure iOS SDL source is present
-        run: |
-          set -euxo pipefail
-          cd applesauce
-          git submodule sync --recursive || true
-          git submodule update --init --recursive || true
-
-          # The iOS host intentionally uses a shared SDL build from this fork.
-          if [ ! -f vendor/rust-sdl2/sdl2-sys/SDL/CMakeLists.txt ]; then
-            rm -rf vendor/rust-sdl2
-            git clone --depth 1 --branch touchhle-ios-host https://github.com/johnny901901901/rust-sdl2.git vendor/rust-sdl2
-            git -C vendor/rust-sdl2 submodule update --init --recursive
-          fi
+          set -euo pipefail
+          git -C applesauce apply --check ../patches/ios-rendering-backport.patch
+          git -C applesauce apply ../patches/ios-rendering-backport.patch
+          git -C applesauce diff --check
+          git -C applesauce diff --stat
 
       - name: Make side-by-side test app
         run: |
-          set -euxo pipefail
-          cd applesauce
-          test -f platform/ios/Config/Build.xcconfig
-          test -f platform/ios/scripts/build-host.sh
-          test -f platform/ios/rust-entry/Cargo.toml
-          sed -i '' 's/^PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = io.github.sloppytaco.applesaucehyperhletest/' platform/ios/Config/Build.xcconfig
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Applesauce HLE Test' platform/ios/Config/Info.plist
-          grep '^PRODUCT_BUNDLE_IDENTIFIER' platform/ios/Config/Build.xcconfig
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' platform/ios/Config/Info.plist
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          config = Path('applesauce/platform/ios/Config/Build.xcconfig')
+          original = 'PRODUCT_BUNDLE_IDENTIFIER = io.github.johnny901901901.applesauce'
+          text = config.read_text()
+          assert original in text
+          config.write_text(text.replace(original, 'PRODUCT_BUNDLE_IDENTIFIER = ' + os.environ['TEST_BUNDLE_ID']))
+          verifier = Path('applesauce/platform/ios/scripts/verify-ipa.sh')
+          verifier.write_text(verifier.read_text().replace('io.github.johnny901901901.applesauce', os.environ['TEST_BUNDLE_ID']))
+          PY
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Applesauce HLE Test' applesauce/platform/ios/Config/Info.plist
 
       - name: Build shared SDL for iPhone
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           cd applesauce
           export DEVELOPER_DIR="$(xcode-select -p)"
           export TOUCHHLE_BOOST_ROOT="$(brew --prefix boost)/include"
-          sh platform/ios/scripts/build-sdl-shared.sh iphoneos
+          sh platform/ios/scripts/build-sdl-shared.sh iphoneos 2>&1 | tee ../build-sdl.log
 
       - name: Build unsigned iPhone app
         run: |
-          set -uo pipefail
+          set -euo pipefail
           cd applesauce
           export DEVELOPER_DIR="$(xcode-select -p)"
           export TOUCHHLE_BOOST_ROOT="$(brew --prefix boost)/include"
-          set +e
           sh platform/ios/scripts/build-host.sh iphoneos Release 2>&1 | tee ../build-host.log
-          status=${PIPESTATUS[0]}
-          set -e
-          echo "build-host exit code: $status" | tee -a ../build-host.log
-          exit "$status"
 
-      - name: Upload build diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-host-diagnostics
-          path: build-host.log
-          if-no-files-found: warn
-
-      - name: Package unsigned IPA
+      - name: Package and verify unsigned IPA
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           cd applesauce
           mkdir -p dist
-          sh platform/ios/scripts/package-ipa.sh dist/Applesauce-HyperHLE-Trunk-Test.ipa
-          shasum -a 256 dist/Applesauce-HyperHLE-Trunk-Test.ipa | tee dist/Applesauce-HyperHLE-Trunk-Test.ipa.sha256
+          sh platform/ios/scripts/package-ipa.sh dist/Applesauce-HLE-Rendering-Test.ipa 2>&1 | tee ../package.log
+          sh platform/ios/scripts/verify-ipa.sh dist/Applesauce-HLE-Rendering-Test.ipa 2>&1 | tee ../verify-ipa.log
+          shasum -a 256 dist/Applesauce-HLE-Rendering-Test.ipa > dist/Applesauce-HLE-Rendering-Test.ipa.sha256
           {
-            echo "HyperHLE source: KlugKlugTG/HyperHLE-Fork trunk"
-            echo "HyperHLE base: $(git rev-parse $(git merge-base HEAD applesauce-port/ios-host) 2>/dev/null || true)"
-            echo "Final tree: $(git rev-parse HEAD)"
-            echo "Applesauce iOS port head replayed: $(git rev-parse applesauce-port/ios-host)"
-            echo "Bundle ID: io.github.sloppytaco.applesaucehyperhletest"
+            echo "Applesauce iOS base: $APPLESAUCE_REF"
+            echo "Graphics: targeted HyperHLE-derived backport; not the full trunk core"
+            echo "Build configuration: $GITHUB_SHA"
+            echo "Bundle ID: $TEST_BUNDLE_ID"
+            shasum -a 256 ../patches/ios-rendering-backport.patch
           } > dist/BUILD_INFO.txt
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Applesauce-HyperHLE-Trunk-Test
+          name: Applesauce-HLE-Rendering-Test
           path: |
-            applesauce/dist/Applesauce-HyperHLE-Trunk-Test.ipa
-            applesauce/dist/Applesauce-HyperHLE-Trunk-Test.ipa.sha256
+            applesauce/dist/Applesauce-HLE-Rendering-Test.ipa
+            applesauce/dist/Applesauce-HLE-Rendering-Test.ipa.sha256
             applesauce/dist/BUILD_INFO.txt
           if-no-files-found: error
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics
+          path: |
+            build-sdl.log
+            build-host.log
+            package.log
+            verify-ipa.log
+          if-no-files-found: warn
