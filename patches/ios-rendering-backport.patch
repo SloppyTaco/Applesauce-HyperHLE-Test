@@ -1,5 +1,5 @@
 diff --git a/src/frameworks/opengles/eagl.rs b/src/frameworks/opengles/eagl.rs
-index b18a0d6c..7b074808 100644
+index b18a0d6c..c6c06199 100644
 --- a/src/frameworks/opengles/eagl.rs
 +++ b/src/frameworks/opengles/eagl.rs
 @@ -95,6 +95,7 @@ pub(super) struct EAGLContextHostObject {
@@ -33,7 +33,7 @@ index b18a0d6c..7b074808 100644
      for &(guest_buf, _host_buf) in host_obj.mapped_buffers.values() {
          env.mem.free(guest_buf);
      }
-@@ -646,13 +652,33 @@ pub const CLASSES: ClassExports = objc_classes! {
+@@ -646,13 +652,39 @@ pub const CLASSES: ClassExports = objc_classes! {
  
      std::mem::drop(gles);
  
@@ -54,16 +54,22 @@ index b18a0d6c..7b074808 100644
 +            Some((renderbuffer, drawable))
 +        } else if bindings.len() == 1 {
 +            let (&bound_renderbuffer, &drawable) = bindings.iter().next().unwrap();
-+            log_once!(
-+                "EAGL present binding mismatch: current={}, drawable renderbuffer={}; using the drawable renderbuffer.",
-+                renderbuffer, bound_renderbuffer
-+            );
++            static RECOVERY_LOGGED: std::sync::Once = std::sync::Once::new();
++            RECOVERY_LOGGED.call_once(|| {
++                log!(
++                    "EAGL present binding mismatch: current={}, drawable renderbuffer={}; using the drawable renderbuffer.",
++                    renderbuffer, bound_renderbuffer
++                );
++            });
 +            Some((bound_renderbuffer, drawable))
 +        } else {
-+            log_once!(
-+                "EAGL present skipped: renderbuffer {} has no drawable ({} registered).",
-+                renderbuffer, bindings.len()
-+            );
++            static SKIP_LOGGED: std::sync::Once = std::sync::Once::new();
++            SKIP_LOGGED.call_once(|| {
++                log!(
++                    "EAGL present skipped: renderbuffer {} has no drawable ({} registered).",
++                    renderbuffer, bindings.len()
++                );
++            });
 +            None
 +        }
 +    };
@@ -74,7 +80,7 @@ index b18a0d6c..7b074808 100644
          return false;
      };
  
-@@ -677,7 +703,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+@@ -677,7 +709,7 @@ pub const CLASSES: ClassExports = objc_classes! {
          );
          // re-borrow
          unsafe {
@@ -83,7 +89,7 @@ index b18a0d6c..7b074808 100644
          }
      } else {
          if fullscreen_layer != nil {
-@@ -717,7 +743,7 @@ pub const CLASSES: ClassExports = objc_classes! {
+@@ -717,7 +749,7 @@ pub const CLASSES: ClassExports = objc_classes! {
                  env.current_thread,
              );
              match maybe_gles {
@@ -92,7 +98,7 @@ index b18a0d6c..7b074808 100644
                  None => {
                      log!(
                          "[EAGLContext presentRenderbuffer:{:#x}] lost GL \
-@@ -883,6 +909,17 @@ unsafe fn get_renderbuffer_size(gles: &mut dyn GLES) -> (GLsizei, GLsizei) {
+@@ -883,6 +915,17 @@ unsafe fn get_renderbuffer_size(gles: &mut dyn GLES) -> (GLsizei, GLsizei) {
      (width, height)
  }
  
@@ -110,7 +116,7 @@ index b18a0d6c..7b074808 100644
  /// Copies the pixels in a renderbuffer bound to `GL_RENDERBUFFER_BINDING_OES`
  /// (which should be provided by the app) to a provided [Vec], trying to avoid
  /// noticeably modifying OpenGL ES state while doing so.
-@@ -892,9 +929,8 @@ unsafe fn get_renderbuffer_size(gles: &mut dyn GLES) -> (GLsizei, GLsizei) {
+@@ -892,9 +935,8 @@ unsafe fn get_renderbuffer_size(gles: &mut dyn GLES) -> (GLsizei, GLsizei) {
  /// The returned values are the [Vec], the width and height.
  ///
  /// The provided context must be current.
@@ -122,7 +128,7 @@ index b18a0d6c..7b074808 100644
      let width_u32: u32 = width.try_into().unwrap();
      let height_u32: u32 = height.try_into().unwrap();
  
-@@ -966,6 +1002,7 @@ unsafe fn read_renderbuffer(gles: &mut dyn GLES, mut pixel_buffer: Vec<u8>) -> (
+@@ -966,6 +1008,7 @@ unsafe fn read_renderbuffer(gles: &mut dyn GLES, mut pixel_buffer: Vec<u8>) -> (
  /// etc. are not part of ES 2.0 state and thus need no save/restore.
  unsafe fn present_renderbuffer_es2(
      gles: &mut dyn GLES,
@@ -130,7 +136,7 @@ index b18a0d6c..7b074808 100644
      drawable_framebuffer: GLuint,
      viewport: (u32, u32, u32, u32),
      rotation_matrix: crate::matrix::Matrix<2>,
-@@ -998,6 +1035,8 @@ unsafe fn present_renderbuffer_es2(
+@@ -998,6 +1041,8 @@ unsafe fn present_renderbuffer_es2(
      let cull_was_on = gles.IsEnabled(gles2::CULL_FACE) != 0;
      let blend_was_on = gles.IsEnabled(gles2::BLEND) != 0;
      let scissor_was_on = gles.IsEnabled(gles2::SCISSOR_TEST) != 0;
@@ -139,7 +145,7 @@ index b18a0d6c..7b074808 100644
  
      let present_attribs = [6u32, 7u32];
      let mut attrib_enabled = [0i32; 2];
-@@ -1019,15 +1058,7 @@ unsafe fn present_renderbuffer_es2(
+@@ -1019,15 +1064,7 @@ unsafe fn present_renderbuffer_es2(
  
      // Resolve renderbuffer → texture with a cached FBO + `glCopyTexImage2D`,
      // using the ES 2.0 entry points.
@@ -156,7 +162,7 @@ index b18a0d6c..7b074808 100644
  
      let present_objects = ensure_present_objects(gles);
      gles.BindFramebuffer(gles2::FRAMEBUFFER, present_objects.framebuffer);
-@@ -1084,6 +1115,19 @@ unsafe fn present_renderbuffer_es2(
+@@ -1084,6 +1121,19 @@ unsafe fn present_renderbuffer_es2(
                  gles2::UNSIGNED_BYTE,
                  pixels.as_mut_ptr().cast(),
              );
@@ -176,7 +182,7 @@ index b18a0d6c..7b074808 100644
              gles.TexImage2D(
                  gles2::TEXTURE_2D,
                  0,
-@@ -1342,17 +1386,38 @@ struct PresentObjects {
+@@ -1342,17 +1392,38 @@ struct PresentObjects {
  }
  
  thread_local! {
@@ -220,7 +226,7 @@ index b18a0d6c..7b074808 100644
          return Some(p);
      }
  
-@@ -1452,7 +1517,7 @@ unsafe fn ensure_present_program(gles: &mut dyn GLES) -> Option<PresentProgram>
+@@ -1452,7 +1523,7 @@ unsafe fn ensure_present_program(gles: &mut dyn GLES) -> Option<PresentProgram>
          u_tex,
          u_tex_mat,
      };
@@ -229,7 +235,7 @@ index b18a0d6c..7b074808 100644
      Some(result)
  }
  
-@@ -1469,7 +1534,8 @@ unsafe fn ensure_present_program(gles: &mut dyn GLES) -> Option<PresentProgram>
+@@ -1469,7 +1540,8 @@ unsafe fn ensure_present_program(gles: &mut dyn GLES) -> Option<PresentProgram>
  /// v-sync and never does this churn. Caching the objects per thread and reusing
  /// them every frame removes that churn entirely.
  unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
@@ -239,7 +245,7 @@ index b18a0d6c..7b074808 100644
          return o;
      }
  
-@@ -1507,7 +1573,7 @@ unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
+@@ -1507,7 +1579,7 @@ unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
          texture,
          quad_vbo,
      };
@@ -248,7 +254,7 @@ index b18a0d6c..7b074808 100644
      result
  }
  
-@@ -1515,7 +1581,7 @@ unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
+@@ -1515,7 +1587,7 @@ unsafe fn ensure_present_objects(gles: &mut dyn GLES) -> PresentObjects {
  /// (which should be provided by the app) to a texture and presents it with
  /// [present_frame], trying to avoid noticeably modifying OpenGL ES state while
  /// doing so. The front and back buffers are then swapped.
@@ -257,7 +263,7 @@ index b18a0d6c..7b074808 100644
      // Capture this up front because the env borrow is moved into the GL
      // context machinery below.
      let trace_gl_errors = env.options.trace_gl_errors;
-@@ -1585,6 +1651,10 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
+@@ -1585,6 +1657,10 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
          .objc
          .borrow::<EAGLContextHostObject>(context)
          .drawable_framebuffer;
@@ -268,7 +274,7 @@ index b18a0d6c..7b074808 100644
  
      let Some(gles_ctx) = super::get_thread_context(
          &mut env.framework_state.opengles,
-@@ -1667,8 +1737,10 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
+@@ -1667,8 +1743,10 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
      // glEnableClientState / glVertexPointer. Use a small dedicated
      // shader-based presenter instead.
      if gles.is_es2() {
@@ -279,7 +285,7 @@ index b18a0d6c..7b074808 100644
              drawable_framebuffer,
              viewport,
              rotation_matrix,
-@@ -1685,8 +1757,7 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
+@@ -1685,8 +1763,7 @@ unsafe fn present_renderbuffer(env: &mut Environment, context: id) {
      // draw to the default framebuffer via a textured quad, which can be
      // rotated, scaled or letterboxed as appropriate.
  
