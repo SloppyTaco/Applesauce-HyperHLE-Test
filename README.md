@@ -4,29 +4,30 @@ Experimental, unsigned iPhone build for investigating Order Up!! rendering.
 The test installs as **Applesauce HLE Test**, with bundle ID
 `io.github.sloppytaco.applesaucehyperhletest`.
 
-## Current test: v11
+## Current test: v12
 
-The v10 phone log and screenshot confirm that the repaired scissor box permits
-clears, and that the direct ES2 presenter delivers the green control square.
-The game's source renderbuffer remains black before that square is injected.
-Menu audio continues and the game exits normally.
+The v11 phone log confirms that `screen_dims.xy` was zero. V11 corrected that
+uniform, but every sampled menu position still collapsed to the same point.
+UV coordinates and white vertex/material colors were intact, GL queries and
+draws reported no errors, and the source renderbuffer remained black.
 
-The shipped GUI vertex shader divides positions by `screen_dims.xy`, a separate
-uniform from the viewport. V11 repairs only zero, negative or non-finite values
-of that vec4, using the title's logical 480x320 dimensions. Valid values are
-preserved. The phone log has not yet established whether this uniform is invalid.
+V12 repairs invalid engine dimensions and scales before the ES2 renderer
+constructs its initial viewport. Those same engine inputs supply the GUI shader
+dimensions and menu geometry. It also repairs an invalid cached viewport
+rectangle at the verified ARM caller so its subsequent aspect-ratio calculation
+uses positive dimensions. Positive, finite engine inputs are preserved.
 
-Bounded startup diagnostics record active uniforms, sampler units and texture
-parameters, named vertex attributes and up to four float vertices, plus winding
-and blend state. Native ES2 now forwards the corresponding uniform and texture
-parameter queries. The old green square is removed; source and display readbacks
-remain. V8 audio resume and V10 presentation changes are retained.
+Guest-memory repairs require the exact bundle/version, Mach-O section layout
+and four independent instruction signatures from the supplied ARMv7 executable.
+Other binaries are skipped. The canvas position multipliers are logged without
+changing them. V8 audio resume, V10 presentation and V11 input diagnostics remain.
 
-Install **Applesauce-HLE-Rendering-Test-v11**, enable JIT, and launch the same
+Install **Applesauce-HLE-Rendering-Test-v12**, enable JIT, and launch the same
 Order Up!! v1.0 game with `--trace-gl-errors --print-fps`. Run for about 20 seconds,
-exit normally, and export the complete host log. Look for `[ORDER UP FIX v11]`,
-`[ORDER UP UNIFORM v11]`, `[ORDER UP VERTEX v11]` and `[ORDER UP INPUTS v11]`.
-Successful compilation does not establish successful rendering on the phone.
+exit normally, and export the complete host log if the picture is still missing.
+Look for `[ORDER UP GEOMETRY v12]`, `[ORDER UP VIEWPORT GEOMETRY v12]`,
+`[ORDER UP VERTEX v11]` and the source/display readbacks. The new log must establish
+whether the engine repair produces nonzero geometry; compilation alone cannot.
 
 The build starts from working Applesauce iOS source at
 `c75278bda86c80cbcec2d8d1493b5be9d5a9e0d1` and applies the small patch in
@@ -57,7 +58,7 @@ the unsupported query instead of consuming existing guest GL errors.
 
 The Actions workflow compiles the iPhone app on macOS, packages an unsigned
 IPA, validates its contents, and uploads the IPA and SHA-256 checksum as
-**Applesauce-HLE-Rendering-Test-v11**. Failed builds upload diagnostic logs.
+**Applesauce-HLE-Rendering-Test-v12**. Failed builds upload diagnostic logs.
 
 Download the artifact after a successful run and extract
 `Applesauce-HLE-Rendering-Test.ipa`. Install it through AltStore Classic
