@@ -62,6 +62,7 @@ jobs:
           python3 patches/order-up-viewport-v6.py
           python3 patches/order-up-framebuffer-v7.py
           python3 patches/order-up-crystal-resume-v8.py
+          python3 patches/order-up-render-probe-v9.py
           git -C applesauce diff --check
           git -C applesauce diff --stat
 
@@ -108,7 +109,7 @@ jobs:
           {
             echo "Applesauce iOS base: $APPLESAUCE_REF"
             echo "Graphics: targeted HyperHLE-derived backport; not the full trunk core"
-            echo "Order Up: v4 NIB viewDidLoad fix + v5 Crystal UI bypass + v6 viewport correction/trace + v7 source framebuffer sampling + v8 synthetic Crystal dismissal/resume"
+            echo "Order Up: v4 NIB viewDidLoad fix + v5 Crystal UI bypass + v6 viewport correction/trace + v8 synthetic Crystal dismissal/resume + v9 validated framebuffer readback, draw-state trace and green control square"
             echo "Build configuration: $GITHUB_SHA"
             echo "Bundle ID: $TEST_BUNDLE_ID"
             shasum -a 256 ../patches/ios-rendering-backport.patch
@@ -116,12 +117,13 @@ jobs:
             shasum -a 256 ../patches/order-up-viewport-v6.py
             shasum -a 256 ../patches/order-up-framebuffer-v7.py
             shasum -a 256 ../patches/order-up-crystal-resume-v8.py
+            shasum -a 256 ../patches/order-up-render-probe-v9.py
           } > dist/BUILD_INFO.txt
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Applesauce-HLE-Rendering-Test-v8
+          name: Applesauce-HLE-Rendering-Test-v9
           path: |
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa.sha256
