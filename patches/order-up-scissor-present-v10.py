@@ -29,10 +29,7 @@ unsafe fn repair_order_up_empty_scissor(gles: &mut dyn GLES) {
         return;
     }
     gles.Scissor(viewport[0], viewport[1], viewport[2], viewport[3]);
-    log_once!(
-        "[ORDER UP FIX v10] Repaired enabled empty scissor box using host viewport {:?}.",
-        viewport
-    );
+    log_once!("[ORDER UP FIX v10] Repaired enabled empty scissor box using host viewport.");
 }
 
 '''
