@@ -4,15 +4,27 @@ Experimental, unsigned iPhone build for investigating Order Up!! rendering.
 The test installs as **Applesauce HLE Test**, with bundle ID
 `io.github.sloppytaco.applesaucehyperhletest`.
 
-## Current test: v13
+## Current test: v14
 
 The V12 phone test restored visible menus and chef selection. Its log confirms
 that the engine dimensions changed from zero to 480×320 and that draws now
-produce visible geometry. Loading the first restaurant exposes a separate
-failure: the readiness task repeatedly calls a method on a null restaurant,
-then the emulator stops after 256 repetitions at ARM return address 0x1565ec.
-The native selection also has a fallback lookup for Diner. Several restaurant
-programs fail to link because a shader attachment is invalid.
+produce visible geometry. After New Game and chef selection, the game
+automatically loads Burger Face's tutorial. That loading fails: the readiness
+task repeatedly calls a method on a null restaurant, then the emulator stops
+after 256 repetitions at ARM return address 0x1565ec.
+
+The V13 phone log confirms zero registered restaurants, no current restaurant,
+and no restaurant_defs module. It contains no initialization or recovery-hook
+markers. The bundled libgcc exports the SjLj registration functions and wins
+the linker's lookup, so V13's host hooks were never reached. Fragment shader
+attachments also receive handle zero during loading; this remains a separate
+diagnostic lead.
+
+V14 installs wrappers for the two SjLj registration functions before guest
+startup, only for the executable verified below. The wrappers run V13's
+observation/recovery hooks and then call the original guest libgcc exports.
+They preserve the library's real thread-local unwind-chain behavior. Normal
+symbol lookup for other games is unchanged.
 
 V13 checks the restaurant manager immediately before level setup. If the
 manager has no entries, no current restaurant and no saved selection, and the
@@ -28,10 +40,11 @@ registered restaurant names, and the first occurrence/stack of known null calls.
 Shader creation, attachment and deletion diagnostics distinguish a missing stage
 from an invalidated GL object without consuming the guest's GL errors.
 
-Install **Applesauce-HLE-Rendering-Test-v13** over the current HLE Test app,
+Install **Applesauce-HLE-Rendering-Test-v14** over the current HLE Test app,
 enable JIT, and launch Order Up!! v1.0 with `--trace-gl-errors --print-fps`.
-Choose New Game, select a chef and try entering the first restaurant. If loading
-stalls or crashes, export the fresh complete host log. Look for
+Choose New Game and select a chef; the Burger Face tutorial starts loading
+automatically. If loading stalls or crashes, export the fresh complete host
+log. Look for `[ORDER UP HOOK v14]`, `[ORDER UP SJLJ v14]`,
 `[ORDER UP INIT v13]`, `[ORDER UP RECOVERY v13]`, `[ORDER UP MODULE v13]`,
 `[ORDER UP NIL v13]` and `[ORDER UP SHADER v13]`. V12 rendering and the earlier
 audio/presentation repairs remain in place.
@@ -65,7 +78,7 @@ the unsupported query instead of consuming existing guest GL errors.
 
 The Actions workflow compiles the iPhone app on macOS, packages an unsigned
 IPA, validates its contents, and uploads the IPA and SHA-256 checksum as
-**Applesauce-HLE-Rendering-Test-v13**. Failed builds upload diagnostic logs.
+**Applesauce-HLE-Rendering-Test-v14**. Failed builds upload diagnostic logs.
 
 Download the artifact after a successful run and extract
 `Applesauce-HLE-Rendering-Test.ipa`. Install it through AltStore Classic
