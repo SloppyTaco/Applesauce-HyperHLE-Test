@@ -66,6 +66,7 @@ jobs:
           python3 patches/order-up-scissor-present-v10.py
           python3 patches/order-up-shader-inputs-v11.py
           python3 patches/order-up-engine-geometry-v12.py
+          python3 patches/order-up-restaurant-init-v13.py
           git -C applesauce diff --check
           git -C applesauce diff --stat
 
@@ -112,7 +113,7 @@ jobs:
           {
             echo "Applesauce iOS base: $APPLESAUCE_REF"
             echo "Graphics: targeted HyperHLE-derived backport; not the full trunk core"
-            echo "Order Up: v4 NIB viewDidLoad fix + v5 Crystal UI bypass + v6 viewport correction/trace + v8 synthetic Crystal dismissal/resume + v9 source/draw diagnostics + v10 empty-scissor repair, direct ES2 presentation and display readback + v11 invalid screen_dims repair and shader-input diagnostics + v12 executable-guarded engine dimensions/scale and cached-viewport repair before geometry creation; green control square removed"
+            echo "Order Up: v4 NIB viewDidLoad fix + v5 Crystal UI bypass + v6 viewport correction/trace + v8 synthetic Crystal dismissal/resume + v9 source/draw diagnostics + v10 empty-scissor repair, direct ES2 presentation and display readback + v11 invalid screen_dims repair and shader-input diagnostics + v12 executable-guarded engine geometry repair (phone menu confirmed) + v13 guarded replay of original restaurant initialization for an empty/unselected manager before level setup, with module/nil/shader traces; green control square removed"
             echo "Build configuration: $GITHUB_SHA"
             echo "Bundle ID: $TEST_BUNDLE_ID"
             shasum -a 256 ../patches/ios-rendering-backport.patch
@@ -124,12 +125,13 @@ jobs:
             shasum -a 256 ../patches/order-up-scissor-present-v10.py
             shasum -a 256 ../patches/order-up-shader-inputs-v11.py
             shasum -a 256 ../patches/order-up-engine-geometry-v12.py
+            shasum -a 256 ../patches/order-up-restaurant-init-v13.py
           } > dist/BUILD_INFO.txt
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Applesauce-HLE-Rendering-Test-v12
+          name: Applesauce-HLE-Rendering-Test-v13
           path: |
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa.sha256

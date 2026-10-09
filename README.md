@@ -4,30 +4,37 @@ Experimental, unsigned iPhone build for investigating Order Up!! rendering.
 The test installs as **Applesauce HLE Test**, with bundle ID
 `io.github.sloppytaco.applesaucehyperhletest`.
 
-## Current test: v12
+## Current test: v13
 
-The v11 phone log confirms that `screen_dims.xy` was zero. V11 corrected that
-uniform, but every sampled menu position still collapsed to the same point.
-UV coordinates and white vertex/material colors were intact, GL queries and
-draws reported no errors, and the source renderbuffer remained black.
+The V12 phone test restored visible menus and chef selection. Its log confirms
+that the engine dimensions changed from zero to 480×320 and that draws now
+produce visible geometry. Loading the first restaurant exposes a separate
+failure: the readiness task repeatedly calls a method on a null restaurant,
+then the emulator stops after 256 repetitions at ARM return address 0x1565ec.
+The native selection also has a fallback lookup for Diner. Several restaurant
+programs fail to link because a shader attachment is invalid.
 
-V12 repairs invalid engine dimensions and scales before the ES2 renderer
-constructs its initial viewport. Those same engine inputs supply the GUI shader
-dimensions and menu geometry. It also repairs an invalid cached viewport
-rectangle at the verified ARM caller so its subsequent aspect-ratio calculation
-uses positive dimensions. Positive, finite engine inputs are preserved.
+V13 checks the restaurant manager immediately before level setup. If the
+manager has no entries, no current restaurant and no saved selection, and the
+asset/script stores exist, it calls the game's original initialization routine
+once. It preserves the complete CPU context around that call and lets the
+original selection and readiness logic continue. This is a recovery attempt;
+successful restaurant loading still requires a phone test.
 
-Guest-memory repairs require the exact bundle/version, Mach-O section layout
-and four independent instruction signatures from the supplied ARMv7 executable.
-Other binaries are skipped. The canvas position multipliers are logged without
-changing them. V8 audio resume, V10 presentation and V11 input diagnostics remain.
+The recovery requires the exact title/version, Mach-O section layout, manager
+vtable and six instruction signatures verified against the supplied ARMv7 game.
+The logs record normal initialization, the restaurant_defs module result,
+registered restaurant names, and the first occurrence/stack of known null calls.
+Shader creation, attachment and deletion diagnostics distinguish a missing stage
+from an invalidated GL object without consuming the guest's GL errors.
 
-Install **Applesauce-HLE-Rendering-Test-v12**, enable JIT, and launch the same
-Order Up!! v1.0 game with `--trace-gl-errors --print-fps`. Run for about 20 seconds,
-exit normally, and export the complete host log if the picture is still missing.
-Look for `[ORDER UP GEOMETRY v12]`, `[ORDER UP VIEWPORT GEOMETRY v12]`,
-`[ORDER UP VERTEX v11]` and the source/display readbacks. The new log must establish
-whether the engine repair produces nonzero geometry; compilation alone cannot.
+Install **Applesauce-HLE-Rendering-Test-v13** over the current HLE Test app,
+enable JIT, and launch Order Up!! v1.0 with `--trace-gl-errors --print-fps`.
+Choose New Game, select a chef and try entering the first restaurant. If loading
+stalls or crashes, export the fresh complete host log. Look for
+`[ORDER UP INIT v13]`, `[ORDER UP RECOVERY v13]`, `[ORDER UP MODULE v13]`,
+`[ORDER UP NIL v13]` and `[ORDER UP SHADER v13]`. V12 rendering and the earlier
+audio/presentation repairs remain in place.
 
 The build starts from working Applesauce iOS source at
 `c75278bda86c80cbcec2d8d1493b5be9d5a9e0d1` and applies the small patch in
@@ -58,7 +65,7 @@ the unsupported query instead of consuming existing guest GL errors.
 
 The Actions workflow compiles the iPhone app on macOS, packages an unsigned
 IPA, validates its contents, and uploads the IPA and SHA-256 checksum as
-**Applesauce-HLE-Rendering-Test-v12**. Failed builds upload diagnostic logs.
+**Applesauce-HLE-Rendering-Test-v13**. Failed builds upload diagnostic logs.
 
 Download the artifact after a successful run and extract
 `Applesauce-HLE-Rendering-Test.ipa`. Install it through AltStore Classic
