@@ -3,11 +3,8 @@ from pathlib import Path
 source = Path("applesauce/src/objc/messages.rs")
 text = source.read_text()
 
-import_needle = "use super::{id, nil, Class, ObjC, IMP, SEL};"
-import_replacement = "use super::{id, msg, msg_class, nil, Class, ObjC, IMP, SEL};"
-if import_needle not in text:
-    raise SystemExit("V8 patch failed: messages.rs import anchor not found")
-text = text.replace(import_needle, import_replacement, 1)
+# messages.rs already re-exports msg and msg_class in this module. Importing
+# them again from super causes Rust E0252 duplicate macro definitions.
 
 old = '''        if selector_name == "activateCrystalUI"
             && env.objc.get_class_name(receiver) == "CrystalSession"
