@@ -150,15 +150,17 @@ fn recover_before_level(env: &mut Environment, slide: u32) {
     env.libc_state.order_up.recovery_attempted = true;
     log_once!("[ORDER UP RECOVERY v13] Empty restaurant list: replaying the game's initializer before level setup.");
 
-    // Preserve all CPU state, including caller-saved VFP registers/FPSCR.
-    // The initializer takes only a pointer, so its temporary context needs
-    // no incoming floating-point arguments. Heap changes survive the call.
-    let regs = *env.cpu.regs();
-    let cpsr = env.cpu.cpsr();
+    // Preserve all CPU state and run with the original VFP registers and
+    // FPSCR modes. Heap changes survive the call; CPU changes do not.
     let mut saved = CpuContext::new();
     env.cpu.swap_context(&mut saved);
-    *env.cpu.regs_mut() = regs;
-    env.cpu.set_cpsr(cpsr);
+    let mut execution = CpuContext {
+        regs: saved.regs,
+        extregs: saved.extregs,
+        cpsr: saved.cpsr,
+        fpscr: saved.fpscr,
+    };
+    env.cpu.swap_context(&mut execution);
     let (): () = GuestFunction::from_addr_with_thumb_bit(slide + 0xc775c)
         .call_from_host(env, (MutVoidPtr::from_bits(manager),));
     env.cpu.swap_context(&mut saved);
