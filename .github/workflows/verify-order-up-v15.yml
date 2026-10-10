@@ -27,7 +27,7 @@ jobs:
           run-id: 38021882355
           github-token: ${{ github.token }}
           path: download
-      - name: Verify the IPA and prepare its download name
+      - name: Verify the existing emulator IPA
         shell: bash
         run: |
           set -euo pipefail
@@ -56,6 +56,7 @@ jobs:
           assert len(patches) == 12 and len(set(patches)) == 12
           assert "order-up-cache-v15.patch" in patches
           assert hashlib.sha256((root / "patches/order-up-cache-v15.patch").read_bytes()).hexdigest() == "1a18521f8cac9cf55f08653f883df099c7092de505cd75120fb8dfc96f4dfa7a"
+          assert "4803003a568c0e3d0ce4132378902dfce966dfde57935aacf6cd719528f28f85" in (root / "patches/order-up-cache-v15.patch").read_text()
           
           with zipfile.ZipFile(source) as ipa:
               assert ipa.testzip() is None, "IPA archive integrity failure"
@@ -77,9 +78,10 @@ jobs:
                   b"[ORDER UP FIX v11]", b"[ORDER UP UNIFORM v11]",
                   b"[ORDER UP VERTEX v11]", b"[ORDER UP INPUTS v11]",
                   b"[ORDER UP DISPLAY v10]", b"[ORDER UP FIX v10]", b"[ORDER UP FIX v8]",
-                  b"4803003a568c0e3d0ce4132378902dfce966dfde57935aacf6cd719528f28f85",
-                  b"662041f674c65c3d3323207cf680a58be19eeb1a0d4864ff2750de5a4dfa7ccb",
+                            b"662041f674c65c3d3323207cf680a58be19eeb1a0d4864ff2750de5a4dfa7ccb",
                   b"data_iph_wad/chef_v1b.pkg", b"Chef.wad.v15-backup-",
+        b"unrecognized source archive; existing cache retained",
+        b"decoded Chef.wad does not match the original",
                   b"No existing cache; leaving first extraction to the game."
               ]
               for marker in markers:
@@ -97,7 +99,7 @@ jobs:
               "filename": target.name, "bytes": target.stat().st_size, "sha256": actual,
               "build_commit": expected_commit, "source_run": 38021882355, "source_artifact": 11658284178,
               "patch_count": len(patches), "bundle_id": info["CFBundleIdentifier"],
-              "checks": "IPA checksum and archive integrity; pinned commit and 12 patch hashes; ARM64 host/core; compiled V15 cache guards and earlier fixes",
+              "checks": "IPA checksum and archive integrity; pinned commit and 12 patch hashes; ARM64 host/core; compiled V15 guard messages, pinned source digests, and earlier fixes",
               "phone_tutorial_gameplay": "unverified"
           }
           (out / "verification.json").write_text(json.dumps(report, indent=2) + "\n")
