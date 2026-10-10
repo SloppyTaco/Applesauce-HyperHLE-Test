@@ -1,0 +1,434 @@
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -182,7 +182,16 @@
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0700ddab506f33b20a03b13996eccd309a48e5ff77d0d95926aa0210fb4e95f1"
+ dependencies = [
+- "bit-vec",
++ "bit-vec 0.6.3",
++]
++
++[[package]]
++name = "bit-set"
++version = "0.6.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f0481a0e032742109b1133a095184ee93d88f3dc9e0d28a5d033dc77a073f44f"
++dependencies = [
++ "bit-vec 0.7.0",
+ ]
+ 
+ [[package]]
+@@ -190,6 +199,12 @@
+ version = "0.6.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
++
++[[package]]
++name = "bit-vec"
++version = "0.7.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d2c54ff287cfc0a34f38a6b832ea1bd8e448a330b3e40a50859e6488bee07f22"
+ 
+ [[package]]
+ name = "bitflags"
+@@ -355,6 +370,15 @@
+ checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
+ 
+ [[package]]
++name = "chrono"
++version = "0.4.45"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
++dependencies = [
++ "num-traits",
++]
++
++[[package]]
+ name = "clang-sys"
+ version = "1.9.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -510,6 +534,21 @@
+ ]
+ 
+ [[package]]
++name = "crc"
++version = "3.4.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5eb8a2a1cd12ab0d987a5d5e825195d372001a4094a0376319d5a0ad71c1ba0d"
++dependencies = [
++ "crc-catalog",
++]
++
++[[package]]
++name = "crc-catalog"
++version = "2.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
++
++[[package]]
+ name = "crc32fast"
+ version = "1.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -704,6 +743,27 @@
+ version = "0.1.9"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
++
++[[package]]
++name = "filetime"
++version = "0.2.29"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
++dependencies = [
++ "cfg-if",
++ "libc",
++]
++
++[[package]]
++name = "filetime_creation"
++version = "0.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c25b5d475550e559de5b0c0084761c65325444e3b6c9e298af9cefe7a9ef3a5f"
++dependencies = [
++ "cfg-if",
++ "filetime",
++ "windows-sys 0.52.0",
++]
+ 
+ [[package]]
+ name = "find-msvc-tools"
+@@ -1332,6 +1392,15 @@
+ version = "0.4.33"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
++
++[[package]]
++name = "lzma-rust"
++version = "0.1.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5baab2bbbd7d75a144d671e9ff79270e903957d92fb7386fd39034c709bd2661"
++dependencies = [
++ "byteorder",
++]
+ 
+ [[package]]
+ name = "mach_object"
+@@ -1412,7 +1481,7 @@
+ checksum = "e536ae46fcab0876853bd4a632ede5df4b1c2527a58f6c5a4150fe86be858231"
+ dependencies = [
+  "arrayvec",
+- "bit-set",
++ "bit-set 0.5.3",
+  "bitflags 2.13.1",
+  "codespan-reporting",
+  "hexf-parse",
+@@ -1453,6 +1522,16 @@
+ ]
+ 
+ [[package]]
++name = "nt-time"
++version = "0.8.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2de419e64947cd8830e66beb584acc3fb42ed411d103e3c794dda355d1b374b5"
++dependencies = [
++ "chrono",
++ "time",
++]
++
++[[package]]
+ name = "num-complex"
+ version = "0.4.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -2003,6 +2082,23 @@
+  "serde",
+  "serde_core",
+  "zmij",
++]
++
++[[package]]
++name = "sevenz-rust"
++version = "0.6.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "26482cf1ecce4540dc782fc70019eba89ffc4d87b3717eb5ec524b5db6fdefef"
++dependencies = [
++ "bit-set 0.6.0",
++ "byteorder",
++ "crc",
++ "filetime_creation",
++ "js-sys",
++ "lzma-rust",
++ "nt-time",
++ "sha2",
++ "wasm-bindgen",
+ ]
+ 
+ [[package]]
+@@ -2419,6 +2515,7 @@
+  "rusttype",
+  "sdl2",
+  "sdl2-sys",
++ "sevenz-rust",
+  "sha1",
+  "sha2",
+  "symphonia",
+@@ -2727,7 +2824,7 @@
+ checksum = "d50819ab545b867d8a454d1d756b90cd5f15da1f2943334ca314af10583c9d39"
+ dependencies = [
+  "arrayvec",
+- "bit-vec",
++ "bit-vec 0.6.3",
+  "bitflags 2.13.1",
+  "bytemuck",
+  "cfg_aliases",
+@@ -2757,7 +2854,7 @@
+  "android_system_properties",
+  "arrayvec",
+  "ash",
+- "bit-set",
++ "bit-set 0.5.3",
+  "bitflags 2.13.1",
+  "block",
+  "cfg_aliases",
+diff --git a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -74,6 +74,7 @@
+ md-5 = "0.10.6"
+ sha1 = "0.10.6"
+ sha2 = "0.10.8"
++sevenz-rust = { version = "=0.6.1", default-features = false }
+ encoding_rs = "0.8.35"
+ # We currently use a fork of rust-sdl2 because we need a fix for Android builds
+ # that's not upstream yet.
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -47,6 +47,7 @@
+ mod objc;
+ mod options;
+ mod order_up;
++mod order_up_cache;
+ mod paths;
+ mod stack;
+ mod window;
+diff --git a/src/order_up.rs b/src/order_up.rs
+--- a/src/order_up.rs
++++ b/src/order_up.rs
+@@ -31,6 +31,9 @@
+ pub(crate) fn install_sjlj_hooks(env: &mut Environment) {
+     if matching_slide(env).is_none() {
+         return;
++    }
++    if let Err(error) = crate::order_up_cache::prepare(&mut env.fs, env.bundle.bundle_path()) {
++        log!("[ORDER UP CACHE v15] Repair skipped: {}", error);
+     }
+     const SYMBOLS: [&str; 2] = [
+         "__Unwind_SjLj_Register", "__Unwind_SjLj_Unregister",
+@@ -269,6 +272,16 @@
+     log!("[ORDER UP NIL v13] site=0x{:x} thread={} registers={:x?}",
+         site, env.current_thread, env.cpu.regs());
+     snapshot(env, slide, "nil-call");
++    if site == 0x275ca9 {
++        let sp = env.cpu.regs()[Cpu::SP];
++        let class_box = word(env, sp + 0xc);
++        let class_ref = word(env, class_box);
++        let class = word(env, class_ref);
++        let fields: Vec<u32> = (0..12)
++            .map(|index| word(env, class.saturating_add(index * 4))).collect();
++        log!("[ORDER UP CLASS v15] VM=0x{:x} class_box=0x{:x} class_ref=0x{:x} class=0x{:x} fields={:x?}",
++            word(env, sp + 0x10), class_box, class_ref, class, fields);
++    }
+     let Some(stack) = env.threads.get(env.current_thread).and_then(|t| t.stack.clone())
+         else { return; };
+     let mut fp = env.cpu.regs()[7];
+diff --git a/src/order_up_cache.rs b/src/order_up_cache.rs
+new file mode 100644
+--- /dev/null
++++ b/src/order_up_cache.rs
+@@ -0,0 +1,185 @@
++// Order Up!! 1.0 cache repair. Called only after executable verification.
++// Accept the supplied archive by its exact digest, decode it on the host,
++// and validate Chef.wad before changing the game's persistent cache.
++use crate::fs::{Fs, GuestPath};
++use sevenz_rust::{Password, SevenZReader};
++use sha2::{Digest, Sha256};
++use std::io::{Cursor, Read};
++
++const PACKAGE_SHA256: &str = "4803003a568c0e3d0ce4132378902dfce966dfde57935aacf6cd719528f28f85";
++const WAD_SHA256: &str = "662041f674c65c3d3323207cf680a58be19eeb1a0d4864ff2750de5a4dfa7ccb";
++const WAD_SIZE: usize = 49_023_680;
++const MAX_UNPACKED: usize = 53_000_000;
++
++fn digest(data: &[u8]) -> String {
++    format!("{:x}", Sha256::digest(data))
++}
++
++fn asset_name(name: &str) -> bool {
++    (name == "Chef.wad" || name.starts_with("streams/"))
++        && !name.contains(['\\', '\0'])
++        && name.split('/').all(|part| !matches!(part, "" | "." | ".."))
++}
++
++fn decode(package: Vec<u8>) -> Result<Vec<(String, Vec<u8>)>, String> {
++    if digest(&package) != PACKAGE_SHA256 {
++        return Err("unrecognized source archive; existing cache retained".into());
++    }
++    let len = package.len() as u64;
++    let mut archive = SevenZReader::new(Cursor::new(package), len, Password::empty())
++        .map_err(|error| error.to_string())?;
++    let mut assets = Vec::new();
++    let mut total = 0usize;
++    archive
++        .for_each_entries(|entry, reader| {
++            if entry.is_directory {
++                return Ok(true);
++            }
++            if !asset_name(entry.name()) || entry.size() > MAX_UNPACKED as u64 {
++                return Err(sevenz_rust::Error::other("unexpected asset entry"));
++            }
++            total = total
++                .checked_add(entry.size() as usize)
++                .filter(|&sum| sum <= MAX_UNPACKED)
++                .ok_or_else(|| sevenz_rust::Error::other("asset size limit exceeded"))?;
++            let mut bytes = Vec::with_capacity(entry.size() as usize);
++            reader.take(entry.size() + 1).read_to_end(&mut bytes)?;
++            if bytes.len() as u64 != entry.size() {
++                return Err(sevenz_rust::Error::other("incomplete asset entry"));
++            }
++            if assets.iter().any(|(name, _)| name == entry.name()) {
++                return Err(sevenz_rust::Error::other("duplicate asset entry"));
++            }
++            assets.push((entry.name().to_owned(), bytes));
++            Ok(true)
++        })
++        .map_err(|error| error.to_string())?;
++    let wad = assets
++        .iter()
++        .find(|(name, _)| name == "Chef.wad")
++        .ok_or("Chef.wad missing from archive")?;
++    if wad.1.len() != WAD_SIZE || digest(&wad.1) != WAD_SHA256 {
++        return Err("decoded Chef.wad does not match the original".into());
++    }
++    Ok(assets)
++}
++
++pub(crate) fn prepare(fs: &mut Fs, bundle_path: &GuestPath) -> Result<(), String> {
++    let cache_dir = fs.home_directory().join("Library/Caches");
++    let cache = cache_dir.join("Chef.wad");
++    let old = match fs.read(&cache) {
++        Ok(bytes) => Some(bytes),
++        Err(()) if !fs.exists(&cache) => None,
++        Err(()) => return Err("existing cache is unreadable; repair stopped".into()),
++    };
++    let old_digest = old.as_deref().map(digest);
++    log!(
++        "[ORDER UP CACHE v15] Chef.wad bytes={} sha256={}",
++        old.as_ref().map_or(0, Vec::len),
++        old_digest.as_deref().unwrap_or("missing")
++    );
++    if old.is_none() {
++        log!("[ORDER UP CACHE v15] No existing cache; leaving first extraction to the game.");
++        return Ok(());
++    }
++    if old.as_ref().is_some_and(|bytes| bytes.len() == WAD_SIZE)
++        && old_digest.as_deref() == Some(WAD_SHA256)
++    {
++        log!("[ORDER UP CACHE v15] Original cache verified; no repair needed.");
++        return Ok(());
++    }
++    drop(old);
++    let package = fs
++        .read(bundle_path.join("data_iph_wad/chef_v1b.pkg"))
++        .map_err(|_| "source archive unavailable; existing cache retained")?;
++    let assets = decode(package)?;
++    let staging = fs.home_directory().join("tmp/orderup-cache-v15");
++    fs.create_dir_all(&staging)
++        .map_err(|error| format!("staging directory: {error:?}"))?;
++    fs.create_dir_all(&cache_dir)
++        .map_err(|error| format!("cache directory: {error:?}"))?;
++
++    // Stage all required writes before publishing Chef.wad. Supply any
++    // missing audio streams too, while retaining existing streams.
++    let mut staged = Vec::new();
++    for (name, bytes) in &assets {
++        let destination = cache_dir.join(name);
++        if name != "Chef.wad" && fs.exists(&destination) {
++            continue;
++        }
++        let temporary = staging.join(name);
++        let parent = temporary.parent().ok_or("invalid staging path")?;
++        fs.create_dir_all(parent)
++            .map_err(|error| format!("staging parent: {error:?}"))?;
++        fs.write(&temporary, bytes)
++            .map_err(|_| "unable to stage asset")?;
++        // Detect incomplete storage writes before replacing the old cache.
++        if fs
++            .read(&temporary)
++            .map_err(|_| "unable to verify staged asset")?
++            != *bytes
++        {
++            return Err("staged asset verification failed; existing cache retained".into());
++        }
++        staged.push((name.as_str(), temporary, destination));
++    }
++    for (name, temporary, destination) in &staged {
++        if *name == "Chef.wad" {
++            continue;
++        }
++        fs.create_dir_all(destination.parent().ok_or("invalid stream path")?)
++            .map_err(|error| format!("stream parent: {error:?}"))?;
++        fs.rename(temporary.as_ref(), destination.as_ref())
++            .map_err(|_| "unable to publish missing stream")?;
++    }
++    let (_, temporary, _) = staged
++        .iter()
++        .find(|(name, _, _)| *name == "Chef.wad")
++        .ok_or("Chef.wad not staged")?;
++    let backup =
++        old_digest.map(|hash| cache_dir.join(&format!("Chef.wad.v15-backup-{}", &hash[..16])));
++    if let Some(backup) = &backup {
++        fs.rename(cache.as_ref(), backup.as_ref())
++            .map_err(|_| "unable to preserve old cache; repair stopped")?;
++    }
++    if fs.rename(temporary.as_ref(), cache.as_ref()).is_err() {
++        if let Some(backup) = &backup {
++            let _ = fs.rename(backup.as_ref(), cache.as_ref());
++        }
++        return Err("unable to publish Chef.wad; attempted rollback".into());
++    }
++    log!("[ORDER UP CACHE v15] Restored original Chef.wad bytes={} sha256={} missing_streams={}; previous cache preserved={}",
++        WAD_SIZE, WAD_SHA256, staged.len() - 1, backup.is_some());
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn archive_paths_cannot_escape_cache() {
++        for name in ["Chef.wad", "streams/bgm_diner02.stm.iph.caf"] {
++            assert!(asset_name(name));
++        }
++        for name in [
++            "../Chef.wad",
++            "/Chef.wad",
++            "streams/../profile",
++            "streams//audio",
++            "streams/./audio",
++            "streams/a\\b",
++            "streams/a\0b",
++        ] {
++            assert!(!asset_name(name));
++        }
++    }
++
++    #[test]
++    fn unrecognized_archive_is_rejected_before_decoding() {
++        assert!(decode(Vec::new())
++            .unwrap_err()
++            .contains("unrecognized source"));
++        assert!(decode(b"not the original archive".to_vec()).is_err());
++    }
++}

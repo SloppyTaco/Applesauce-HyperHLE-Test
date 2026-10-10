@@ -4,50 +4,59 @@ Experimental, unsigned iPhone build for investigating Order Up!! rendering.
 The test installs as **Applesauce HLE Test**, with bundle ID
 `io.github.sloppytaco.applesaucehyperhletest`.
 
-## Current test: v14
+## Current test: v15
 
-The V12 phone test restored visible menus and chef selection. Its log confirms
-that the engine dimensions changed from zero to 480×320 and that draws now
-produce visible geometry. After New Game and chef selection, the game
-automatically loads Burger Face's tutorial. That loading fails: the readiness
-task repeatedly calls a method on a null restaurant, then the emulator stops
-after 256 repetitions at ARM return address 0x1565ec.
+V12 restored visible menus and chef selection on the phone. New Game and chef
+selection then automatically load Burger Face's tutorial. V14 still fails
+there: restaurant_defs returns null, the restaurant manager has zero entries,
+and readiness eventually hits the existing 256-call stop. The V14 log confirms
+that the SjLj wrappers and the guarded original-initializer retry both ran;
+retrying initialization did not restore the missing module.
 
-The V13 phone log confirms zero registered restaurants, no current restaurant,
-and no restaurant_defs module. It contains no initialization or recovery-hook
-markers. The bundled libgcc exports the SjLj registration functions and wins
-the linker's lookup, so V13's host hooks were never reached. Fragment shader
-attachments also receive handle zero during loading; this remains a separate
-diagnostic lead.
+The same V14 source and original supplied game assets register all eight
+restaurants on native x86_64 Linux (debug and release) and ARM64 Linux under
+QEMU. Corrupting the cached compiled restaurant_defs_iph script, while retaining
+the full Chef.wad size, reproduces a null module and an empty restaurant manager
+locally. This makes persistent cache damage a testable cause; it does not prove
+that the phone's cache is damaged.
 
-V14 installs wrappers for the two SjLj registration functions before guest
-startup, only for the executable verified below. The wrappers run V13's
-observation/recovery hooks and then call the original guest libgcc exports.
-They preserve the library's real thread-local unwind-chain behavior. Normal
-symbol lookup for other games is unchanged.
+V15 checks the existing Library/Caches/Chef.wad before guest startup, after the
+same exact executable/title/version/instruction verification used by V14.
+It logs the file's size and SHA-256. An original matching cache is retained.
+A missing cache remains on the game's original first-extraction path. For a
+mismatching existing cache, the host decodes the game's own bundled
+`data_iph_wad/chef_v1b.pkg` using a pinned Rust decoder. It accepts only the exact
+original archive digest and verifies the restored Chef.wad's full digest and
+size before publishing it. Unknown archives are retained without repair.
 
-V13 checks the restaurant manager immediately before level setup. If the
-manager has no entries, no current restaurant and no saved selection, and the
-asset/script stores exist, it calls the game's original initialization routine
-once. It preserves the complete CPU context around that call and lets the
-original selection and readiness logic continue. This is a recovery attempt;
-successful restaurant loading still requires a phone test.
+The helper stages and reads back the decoded files, retains existing audio
+streams, restores missing streams, preserves the previous Chef.wad under a
+checksum-derived backup name, and publishes the verified replacement last.
+Documents and Preferences are not written by the helper. Extraction uses a
+restricted path allowlist and a bounded custom reader, rather than the
+library's default filesystem extractor. The restaurant list, shaders, saved
+selection and readiness flags are never fabricated. A first-null-class trace
+adds evidence if the cache is original but script initialization still fails.
 
-The recovery requires the exact title/version, Mach-O section layout, manager
-vtable and six instruction signatures verified against the supplied ARMv7 game.
-The logs record normal initialization, the restaurant_defs module result,
-registered restaurant names, and the first occurrence/stack of known null calls.
-Shader creation, attachment and deletion diagnostics distinguish a missing stage
-from an invalidated GL object without consuming the guest's GL errors.
+Local validation restored the deliberately corrupted cache to the exact
+original digest and the game then registered all eight restaurants. Existing
+streams and save/settings sentinel files stayed unchanged, and the damaged
+cache backup matched its original bytes. The cache path and unknown-archive
+unit tests pass. The required broad Rust test run has 66 passes and two existing
+duplicate-export failures: CATransform3DMakeScale and NSProcessInfo's
+operatingSystemVersionString. Those source files are unchanged by V15. The
+ARM64 CPU instruction checks passed 502 assertions across 39 tests. These
+checks cover cache restoration and startup; Burger Face gameplay on the phone
+still needs verification.
 
-Install **Applesauce-HLE-Rendering-Test-v14** over the current HLE Test app,
-enable JIT, and launch Order Up!! v1.0 with `--trace-gl-errors --print-fps`.
-Choose New Game and select a chef; the Burger Face tutorial starts loading
-automatically. If loading stalls or crashes, export the fresh complete host
-log. Look for `[ORDER UP HOOK v14]`, `[ORDER UP SJLJ v14]`,
-`[ORDER UP INIT v13]`, `[ORDER UP RECOVERY v13]`, `[ORDER UP MODULE v13]`,
-`[ORDER UP NIL v13]` and `[ORDER UP SHADER v13]`. V12 rendering and the earlier
-audio/presentation repairs remain in place.
+Install **Applesauce-HLE-Rendering-Test-v15** over the current HLE Test app,
+fully close/reopen it, enable JIT, and launch Order Up!! v1.0 with
+`--trace-gl-errors --print-fps`. Choose New Game and select a chef; the Burger
+Face tutorial starts loading automatically. If loading stalls or crashes,
+export the fresh complete host log. Include `[ORDER UP CACHE v15]`,
+`[ORDER UP CLASS v15]`, `[ORDER UP INIT v13]`, `[ORDER UP MODULE v13]`,
+`[ORDER UP RECOVERY v13]` and `[ORDER UP NIL v13]`. Earlier menu rendering,
+audio/presentation fixes and the real guest libgcc unwind behavior remain.
 
 The build starts from working Applesauce iOS source at
 `c75278bda86c80cbcec2d8d1493b5be9d5a9e0d1` and applies the small patch in
@@ -78,7 +87,7 @@ the unsupported query instead of consuming existing guest GL errors.
 
 The Actions workflow compiles the iPhone app on macOS, packages an unsigned
 IPA, validates its contents, and uploads the IPA and SHA-256 checksum as
-**Applesauce-HLE-Rendering-Test-v14**. Failed builds upload diagnostic logs.
+**Applesauce-HLE-Rendering-Test-v15**. Failed builds upload diagnostic logs.
 
 Download the artifact after a successful run and extract
 `Applesauce-HLE-Rendering-Test.ipa`. Install it through AltStore Classic
