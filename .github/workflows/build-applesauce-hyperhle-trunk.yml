@@ -70,6 +70,8 @@ jobs:
           python3 patches/order-up-sjlj-hook-v14.py
           git -C applesauce apply --check ../patches/order-up-cache-v15.patch
           git -C applesauce apply ../patches/order-up-cache-v15.patch
+          git -C applesauce apply --check ../patches/order-up-wide-strings-v16.patch
+          git -C applesauce apply ../patches/order-up-wide-strings-v16.patch
           git -C applesauce diff --check
           git -C applesauce diff --stat
 
@@ -116,7 +118,7 @@ jobs:
           {
             echo "Applesauce iOS base: $APPLESAUCE_REF"
             echo "Graphics: targeted HyperHLE-derived backport; not the full trunk core"
-            echo "Order Up: v4 NIB viewDidLoad fix + v5 Crystal UI bypass + v6 viewport correction/trace + v8 synthetic Crystal dismissal/resume + v9 source/draw diagnostics + v10 empty-scissor repair, direct ES2 presentation and display readback + v11 invalid screen_dims repair and shader-input diagnostics + v12 executable-guarded engine geometry repair (phone menu confirmed) + v13 guarded replay of original restaurant initialization for an empty/unselected manager before level setup, with module/nil/shader traces + v14 SjLj observation wrappers retain original guest libgcc behavior and activate the recovery trigger + v15 validate the existing Chef.wad cache and restore only from the exact original archive, preserving the old cache and game saves; green control square removed"
+            echo "Order Up: v4 NIB viewDidLoad fix + v5 Crystal UI bypass + v6 viewport correction/trace + v8 synthetic Crystal dismissal/resume + v9 source/draw diagnostics + v10 empty-scissor repair, direct ES2 presentation and display readback + v11 invalid screen_dims repair and shader-input diagnostics + v12 executable-guarded engine geometry repair (phone menu confirmed) + v13 guarded replay of original restaurant initialization for an empty/unselected manager before level setup, with module/nil/shader traces + v14 SjLj observation wrappers retain original guest libgcc behavior and activate the recovery trigger + v15 validate the existing Chef.wad cache and restore only from the exact original archive, preserving the old cache and game saves; green control square removed; v16 correct 32-bit wide-string formatting and observe original purchase/ownership state without altering it"
             echo "Build configuration: $GITHUB_SHA"
             echo "Bundle ID: $TEST_BUNDLE_ID"
             shasum -a 256 ../patches/ios-rendering-backport.patch
@@ -131,12 +133,36 @@ jobs:
             shasum -a 256 ../patches/order-up-restaurant-init-v13.py
             shasum -a 256 ../patches/order-up-sjlj-hook-v14.py
             shasum -a 256 ../patches/order-up-cache-v15.patch
+            shasum -a 256 ../patches/order-up-wide-strings-v16.patch
           } > dist/BUILD_INFO.txt
+
+      - name: Check emulator-only package and compiled V16 code
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import plistlib, struct, zipfile
+          from pathlib import Path
+          path = Path('applesauce/dist/Applesauce-HLE-Rendering-Test.ipa')
+          with zipfile.ZipFile(path) as ipa:
+              assert ipa.testzip() is None
+              names = ipa.namelist()
+              assert all(not name.startswith('Payload/Chef.app/') for name in names)
+              assert all(not name.lower().endswith(('.wad', '.pkg', '/chef', '.svs')) for name in names)
+              info = plistlib.loads(ipa.read('Payload/Applesauce.app/Info.plist'))
+              assert info['CFBundleIdentifier'] == 'io.github.sloppytaco.applesaucehyperhletest'
+              assert info['CFBundleDisplayName'] == 'Applesauce HLE Test'
+              core = ipa.read('Payload/Applesauce.app/Frameworks/libhyperhle_core.dylib')
+              assert struct.unpack_from('<II', core) == (0xFEEDFACF, 0x0100000C)
+              for marker in (b'[ORDER UP FORMAT v16]', b'[ORDER UP PURCHASE v16]',
+                             b'[ORDER UP OWNERSHIP v16]', b'[ORDER UP CACHE v15]'):
+                  assert marker in core, marker
+          print('Verified ARM64 V16 emulator package without private game assets.')
+          PY
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Applesauce-HLE-Rendering-Test-v15
+          name: Applesauce-HLE-Rendering-Test-v16
           path: |
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa.sha256

@@ -1,0 +1,244 @@
+diff --git a/src/libc/stdio/printf.rs b/src/libc/stdio/printf.rs
+--- a/src/libc/stdio/printf.rs
++++ b/src/libc/stdio/printf.rs
+@@ -44,6 +44,18 @@
+ /// `get_format_char` is a callback that returns the byte at a given index in
+ /// the format string, or `'\0'` if the index is one past the last byte.
+ pub fn printf_inner<const NS_LOG: bool, F: Fn(&Mem, GuestUSize) -> u8>(
++    env: &mut Environment,
++    get_format_char: F,
++    args: VaList,
++) -> Vec<u8> {
++    printf_inner_mode::<NS_LOG, false, _>(env, get_format_char, args)
++}
++
++fn printf_inner_mode<
++    const NS_LOG: bool,
++    const WIDE_OUTPUT: bool,
++    F: Fn(&Mem, GuestUSize) -> u8,
++>(
+     env: &mut Environment,
+     get_format_char: F,
+     mut args: VaList,
+@@ -233,6 +245,26 @@
+                 write!(&mut res, "{c}").unwrap();
+             }
+             b's' => {
++                if length_modifier == Some("l") {
++                    let source: ConstPtr<wchar_t> = args.next(env);
++                    let field = wide_string_field(
++                        &env.mem, source, precision, WIDE_OUTPUT,
++                    );
++                    let length = if WIDE_OUTPUT {
++                        String::from_utf8_lossy(&field).chars().count()
++                    } else {
++                        field.len()
++                    };
++                    let padding = (pad_width as usize).saturating_sub(length);
++                    if !left_justified {
++                        res.extend(std::iter::repeat(b' ').take(padding));
++                    }
++                    res.extend_from_slice(&field);
++                    if left_justified {
++                        res.extend(std::iter::repeat(b' ').take(padding));
++                    }
++                    continue;
++                }
+                 // assert!(!prepend_sign);
+                 // TODO: support length modifier
+                 // assert!(length_modifier.is_none());
+@@ -707,6 +739,43 @@
+     log_dbg!("=> {:?}", std::str::from_utf8(&res));
+     res
+ } // end printf_inner — THIS is the only closing brace needed here
++
++// Darwin wchar_t is a 32-bit scalar. Reading it as a C byte string
++// truncates ASCII names at the zero byte after their first character.
++fn wide_string_field(
++    mem: &Mem,
++    source: ConstPtr<wchar_t>,
++    precision: Option<usize>,
++    wide_output: bool,
++) -> Vec<u8> {
++    if source.is_null() {
++        let bytes = b"(null)";
++        return bytes[..precision.unwrap_or(bytes.len()).min(bytes.len())].to_vec();
++    }
++    let mut bytes = Vec::new();
++    let mut index = 0;
++    loop {
++        let length = if wide_output { index as usize } else { bytes.len() };
++        if precision.is_some_and(|limit| length >= limit) {
++            break;
++        }
++        let value = mem.read(source + index);
++        if value == 0 {
++            break;
++        }
++        let character = char::from_u32(value as u32).unwrap_or('\u{FFFD}');
++        let mut encoded = [0; 4];
++        let encoded = character.encode_utf8(&mut encoded).as_bytes();
++        if !wide_output
++            && precision.is_some_and(|limit| bytes.len() + encoded.len() > limit)
++        {
++            break;
++        }
++        bytes.extend_from_slice(encoded);
++        index += 1;
++    }
++    bytes
++}
+ 
+ fn f_format(
+     float: f64,
+@@ -1154,7 +1223,7 @@
+     );
+     let wcstr_format_bytes = wcstr_format.as_bytes();
+     let len: GuestUSize = wcstr_format_bytes.len() as GuestUSize;
+-    let res = printf_inner::<false, _>(
++    let res = printf_inner_mode::<false, true, _>(
+         env,
+         |_mem, idx| {
+             if idx == len {
+@@ -1165,15 +1234,24 @@
+         },
+         args,
+     );
+-    let to_write = n.min(res.len() as GuestUSize);
++    let characters: Vec<char> = String::from_utf8_lossy(&res).chars().collect();
++    let to_write = n.min(characters.len() as GuestUSize);
+     for i in 0..to_write {
+-        env.mem.write(ws + i, res[i as usize] as wchar_t);
++        env.mem.write(ws + i, characters[i as usize] as wchar_t);
+     }
+     if to_write >= n {
+         // TODO: set errno
+         return -1;
+     }
+     env.mem.write(ws + to_write, wchar_t::default());
++    if wcstr_format.contains("%ls")
++        && crate::order_up::matching_slide(env).is_some()
++        && env.libc_state.order_up.wide_format_events < 16
++    {
++        env.libc_state.order_up.wide_format_events += 1;
++        log!("[ORDER UP FORMAT v16] format={:?} result={:?}",
++            wcstr_format, String::from_utf8_lossy(&res));
++    }
+     to_write as i32
+ }
+ 
+@@ -1190,7 +1268,7 @@
+ 
+     let wcstr_format_bytes = wcstr_format.as_bytes();
+     let len: GuestUSize = wcstr_format_bytes.len() as GuestUSize;
+-    let res = printf_inner::<false, _>(
++    let res = printf_inner_mode::<false, true, _>(
+         env,
+         |_mem, idx| {
+             if idx == len {
+@@ -1203,7 +1281,7 @@
+     );
+ 
+     let _ = std::io::stdout().write_all(&res);
+-    res.len().try_into().unwrap()
++    String::from_utf8_lossy(&res).chars().count().try_into().unwrap()
+ }
+ 
+ fn printf(env: &mut Environment, format: ConstPtr<u8>, args: DotDotDot) -> i32 {
+@@ -2085,7 +2163,7 @@
+     let wcstr_format_bytes = wcstr_format.as_bytes();
+     let len: GuestUSize = wcstr_format_bytes.len() as GuestUSize;
+     // Передаем байты формата в printf_inner
+-    let res = printf_inner::<false, _>(
++    let res = printf_inner_mode::<false, true, _>(
+         env,
+         |_mem, idx| {
+             if idx == len {
+@@ -2098,7 +2176,7 @@
+     );
+     // Пишем результат напрямую в стандартный вывод (stdout)
+     let _ = std::io::stdout().write_all(&res);
+-    res.len().try_into().unwrap()
++    String::from_utf8_lossy(&res).chars().count().try_into().unwrap()
+ }
+ 
+ // Added NSLog/NSLogv per your documentation and requests
+diff --git a/src/order_up.rs b/src/order_up.rs
+--- a/src/order_up.rs
++++ b/src/order_up.rs
+@@ -22,6 +22,9 @@
+     sjlj_register: Option<GuestFunction>,
+     sjlj_unregister: Option<GuestFunction>,
+     sjlj_calls: u32,
++    purchase_frames: HashSet<u32>,
++    purchase_events: u32,
++    pub(crate) wide_format_events: u32,
+ }
+ 
+ 
+@@ -119,6 +122,8 @@
+         return None;
+     }
+     const SIGNATURES: &[(u32, &[u32])] = &[
++        (0xbf518, &[0xe92d40f0, 0xe28d700c, 0xe92d0d00, 0xed2d8b10, 0xe24ddd16, 0xe59f3fd0, 0xe28d0090, 0xe240000c]),
++        (0xbc838, &[0xe92d40f0, 0xe28d700c, 0xe92d0d00, 0xed2d8b10, 0xe24dd060, 0xe59f3270, 0xe28d0014, 0xe58d1008]),
+         (0x157728, &[0xe92d40f0, 0xe28d700c, 0xe92d0d00, 0xed2d8b10,
+             0xe24ddf7b, 0xe59f3f84, 0xe58d004c, 0xe28d0094]),
+         (0x157770, &[0xeb10d219, 0xe59f0f58, 0xe59d204c]),
+@@ -227,11 +232,44 @@
+     snapshot(env, slide, "after-recovery");
+ }
+ 
++
++// Observe the game's original ownership table; never change purchase state.
++fn purchase_snapshot(env: &Environment, slide: u32, phase: &str, candidate_id: u32) {
++    let manager = word(env, slide + 0x656a70);
++    let profile = word(env, slide + 0x656a74);
++    let count = word(env, manager.saturating_add(8));
++    let entries = word(env, manager.saturating_add(4));
++    if !valid(env, manager, 0x218)
++        || word(env, manager) != slide + 0x66ae6c
++        || !valid(env, profile, 0x12f04)
++        || count > 16 || !valid(env, entries, count * 4)
++    {
++        return;
++    }
++    log!("[ORDER UP PURCHASE v16] phase={} candidate_id=0x{:x} count={} profile=0x{:x}",
++        phase, candidate_id, count, profile);
++    for index in 0..count {
++        let object = word(env, entries + index * 4);
++        let row = profile + index * 0xca0;
++        let identifier = word(env, row);
++        let flags = word(env, row + 4);
++        // Profile rows are matched by ID in the guest, not by definition index.
++        log!("[ORDER UP OWNERSHIP v16] phase={} row={} id=0x{:x} flags=0x{:x} purchased={}",
++            phase, index, identifier, flags, flags & 2 != 0);
++        log!("[ORDER UP DEFINITION v16] phase={} index={} object=0x{:x} name={:?}",
++            phase, index, object, text(env, word(env, object.saturating_add(0x14))));
++    }
++}
++
+ pub(crate) fn register_frame(env: &mut Environment, frame: MutVoidPtr) {
+     let Some(slide) = matching_slide(env) else { return; };
+     let Some(site) = env.cpu.regs()[Cpu::LR].checked_sub(slide) else { return; };
+     let address = frame.to_bits();
+-    if site == 0x157774 {
++    if site == 0xbf568 && env.libc_state.order_up.purchase_events < 16 {
++        env.libc_state.order_up.purchase_events += 1;
++        env.libc_state.order_up.purchase_frames.insert(address);
++        purchase_snapshot(env, slide, "enter", 0);
++    } else if site == 0x157774 {
+         recover_before_level(env, slide);
+     } else if site == 0xc77a8 {
+         env.libc_state.order_up.init_frames.insert(address);
+@@ -249,6 +287,10 @@
+ pub(crate) fn unregister_frame(env: &mut Environment, frame: MutVoidPtr) {
+     let Some(slide) = matching_slide(env) else { return; };
+     let address = frame.to_bits();
++    if env.libc_state.order_up.purchase_frames.remove(&address) {
++        let candidate_id = word(env, address.saturating_add(0x4f4));
++        purchase_snapshot(env, slide, "return", candidate_id);
++    }
+     if env.libc_state.order_up.init_frames.remove(&address) {
+         snapshot(env, slide, "initializer-exit");
+     }
