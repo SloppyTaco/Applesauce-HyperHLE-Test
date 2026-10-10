@@ -13,11 +13,27 @@ recovery does not set purchased/unlocked bits, reset the profile, modify currenc
 or alter chef/day/restaurant progress. The original game performs the purchase.
 It skips recovery if native identity capture or any validation fails.
 
-Validation is pending in the V17 Actions runs. Four profile tests check byte-for-
-byte preservation, repeat calls, existing/partial profiles, and ambiguous mappings.
-The prior 16 guest formatter checks are also run. Purchasing on the user's iPhone
-is not yet confirmed. Logs report native capture, recovery, and original before/
-after purchase state.
+The V17 iPhone build, packaging checks, and validation workflow completed
+successfully. All four profile identity tests passed, including byte-for-byte
+preservation outside the recovered ID words, repeated calls, existing/partial
+profiles, ambiguous mappings, and wrong profile lengths. All 16 independent
+ARMv7 guest formatter cases also passed through the real emulator ABI.
+The broad Rust checks recorded 70 passes and the same two previously confirmed
+duplicate-export failures (`_CATransform3DMakeScale` and
+`NSProcessInfo.operatingSystemVersionString`); no new failures appeared.
+Purchasing on the user's iPhone is not yet confirmed. Logs report native capture,
+recovery, and original before/after purchase state.
+
+Verified V17 iPhone build: [run 38079511023](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38079511023).
+[Profile/formatter validation run 38079511051](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38079511051)
+uses source commit `263f9a36c2d6691d457b73d00b1df982490ce113`.
+The IPA is 42,358,051 bytes, SHA-256
+`9e0d476af0d7976c2fe4f58da2fa30cb09a4399fc506fc4ac00103dd806ba497`.
+After download, the artifact digest, IPA checksum/integrity, all 14 patch hashes,
+ARM64 host/core, compiled V17 recovery markers, existing test-app bundle identity,
+and exclusion of private game assets were checked. The saved download is named
+`Applesauce-OrderUp-v17.ipa`; the GitHub artifact is
+`Applesauce-HLE-Rendering-Test-v17`.
 
 Install over the existing Applesauce HLE Test app to retain its imported game and
 save data, enable JIT as before, and try the purchase once. The package contains
