@@ -28,12 +28,31 @@ indices and profile rows are logged separately because the guest matches
 ownership by ID. These diagnostics do not set ownership, spend money, unlock
 restaurants or replace saves.
 
-This is a candidate until its formatter regression checks and iPhone build
-verification finish. On-device restaurant purchasing remains unverified.
+The V16 iPhone build and package verification passed. The independent ARMv7
+guest regression fails the purchase-name case on V15, then passes all 16
+cases on V16. It exercises the real emulator ABI and formatter entry points,
+including argument order, precision, padding, Unicode counts, output capacity
+and plain narrow strings. The test contains no original game executable or
+assets. The required broader Rust checks are still running.
+
+On-device restaurant purchasing remains unverified, so this remains a
+purchase-diagnostic candidate. The successful checks verify the formatter fix
+and package, rather than an end-to-end Gravy Chug purchase.
 Install V16 over the existing HLE Test app with the same signing account and
 preserve the game data. After trying Gravy Chug once, export the fresh host
 log containing `[ORDER UP FORMAT v16]`, `[ORDER UP PURCHASE v16]`,
 `[ORDER UP OWNERSHIP v16]` and `[ORDER UP DEFINITION v16]`.
+
+Verified V16 build: [run 38036059501](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38036059501),
+source commit `9a2620ac4c8b4ea0d23fc97ab4e944637972ad76`.
+[Formatter regression run 38036333684](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38036333684)
+uses the same V16 source patch, SHA-256
+`9f188f80f356ea452d98c1be5ae9aa12dce0aab6f2dc1a3c470a357295ba2a03`.
+The IPA is 42,354,812 bytes, SHA-256
+`2013011bbaba54cccc7390052a490281690b92272402da1d6cb42169b95ddd5c`.
+The downloaded archive, IPA integrity/checksum, all 13 patch hashes, ARM64
+host/core, V16 compiled markers and exclusion of private game assets were
+also checked after download.
 
 The build starts from working Applesauce iOS source at
 `c75278bda86c80cbcec2d8d1493b5be9d5a9e0d1` and applies the small patch in
