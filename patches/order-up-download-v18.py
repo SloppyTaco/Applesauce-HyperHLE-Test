@@ -14,6 +14,14 @@ def edit(path,old,new):
     source.write_text(text.replace(old,new,1))
 
 
+# serde_json is already present in the pinned dependency lock, but the core
+# needs a direct dependency to decode the private pack manifest.
+edit('Cargo.toml', 'sha2 = "0.10.8"\n',
+     'sha2 = "0.10.8"\nserde_json = "=1.0.151"\n')
+edit('Cargo.lock', ' "sdl2-sys",\n "sevenz-rust",\n',
+     ' "sdl2-sys",\n "serde_json",\n "sevenz-rust",\n')
+
+
 # The original 1.0 ChefDownloadManager callback at 0x1b567c explicitly
 # dismisses the alert again, including on the Yes path at 0x1b5720.
 # Programmatic dismissal must NOT synthesize another button click.
@@ -31,7 +39,7 @@ edit('src/frameworks/uikit/ui_view/ui_alert_view.rs',
     retain(env, this);
     let delegate = env.objc.borrow::<UIAlertViewHostObject>(this).delegate;
     log!("[ALERT CALLBACK v18] Native button {} returned; dispatching one user click", dismiss_index);
-    if delegate != nil && env.mem.read::<u32>(delegate.cast()) != 0 {
+    if delegate != nil && env.mem.read(delegate.cast::<u32>()) != 0 {
         retain(env, delegate);
         if let Some(sel) = env.objc.lookup_selector("alertView:clickedButtonAtIndex:") {
             let responds: bool = msg![env; delegate respondsToSelector:sel];
@@ -243,8 +251,8 @@ fn verified_wads(fs: &Fs) -> bool {
 
 pub(crate) fn installed(fs: &Fs) -> bool {
     let cache = fs.home_directory().join("Library/Caches");
-    fs.size(cache.join("Diner.wad")) == Ok(DINER_SIZE)
-        && fs.size(cache.join("Common.wad")) == Ok(COMMON_SIZE)
+    fs.size(&cache.join("Diner.wad")) == Ok(DINER_SIZE)
+        && fs.size(&cache.join("Common.wad")) == Ok(COMMON_SIZE)
         && fs.is_file(&cache.join("diner_extracted_v1b.svs"))
         && fs.is_file(&cache.join("common_extracted_v1b.svs"))
 }
