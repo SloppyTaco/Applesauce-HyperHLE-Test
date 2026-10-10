@@ -1,0 +1,248 @@
+--- a/src/order_up.rs
++++ b/src/order_up.rs
+@@ -5,7 +5,7 @@
+ // or report the readiness check as successful.
+ use crate::abi::{CallFromHost, GuestFunction};
+ use crate::cpu::{Cpu, CpuContext};
+-use crate::mem::{ConstPtr, MutVoidPtr};
++use crate::mem::{ConstPtr, MutPtr, MutVoidPtr};
+ use crate::Environment;
+ use std::collections::{HashMap, HashSet};
+ 
+@@ -25,6 +25,8 @@
+     purchase_frames: HashSet<u32>,
+     purchase_events: u32,
+     pub(crate) wide_format_events: u32,
++    profile_identity: Option<ProfileIdentity>,
++    identity_recoveries: u32,
+ }
+ 
+ 
+@@ -122,6 +124,8 @@
+         return None;
+     }
+     const SIGNATURES: &[(u32, &[u32])] = &[
++        (0xc813c, &[0xe59c3018, 0xe7823000, 0xe59f3608, 0xe79f3003, 0xe0823003, 0xe58c3480, 0xe58c34c4]),
++        (0xbc884, &[0xeb133dd4]),
+         (0xbf518, &[0xe92d40f0, 0xe28d700c, 0xe92d0d00, 0xed2d8b10, 0xe24ddd16, 0xe59f3fd0, 0xe28d0090, 0xe240000c]),
+         (0xbc838, &[0xe92d40f0, 0xe28d700c, 0xe92d0d00, 0xed2d8b10, 0xe24dd060, 0xe59f3270, 0xe28d0014, 0xe58d1008]),
+         (0x157728, &[0xe92d40f0, 0xe28d700c, 0xe92d0d00, 0xed2d8b10,
+@@ -233,6 +237,113 @@
+ }
+ 
+ 
++const PROFILE_ROWS: usize = 24;
++const PROFILE_ROW_SIZE: usize = 0xca0;
++const PROFILE_SIZE: usize = 0x1302c;
++
++#[derive(Clone)]
++struct ProfileIdentity {
++    manager: u32,
++    profile: u32,
++    // The original initializer supplies both the IDs and their row locations.
++    // Definition order alone is not sufficient to establish a save-row mapping.
++    rows: Vec<(usize, u32)>,
++    definitions: Vec<(u32, u32)>,
++}
++
++fn capture_profile_identity(env: &mut Environment, slide: u32) {
++    let manager = word(env, slide + 0x656a70);
++    let profile = word(env, slide + 0x656a74);
++    let count = word(env, manager.saturating_add(8));
++    let entries = word(env, manager.saturating_add(4));
++    if !valid(env, manager, 0x218)
++        || word(env, manager) != slide + 0x66ae6c
++        || !valid(env, profile, PROFILE_SIZE as u32)
++        || !(1..=16).contains(&count)
++        || !valid(env, entries, count * 4)
++    {
++        log!("[ORDER UP PROFILE v17] Native ID capture skipped: invalid manager/profile.");
++        return;
++    }
++    let mut rows = Vec::new();
++    let mut definitions = Vec::new();
++    let mut identifiers = HashSet::new();
++    let mut locations = HashSet::new();
++    for index in 0..count {
++        let object = word(env, entries + index * 4);
++        if !valid(env, object, 0x4c8) { return; }
++        let identifier = word(env, object + 0x18);
++        let pointer = word(env, object + 0x4c4);
++        let Some(offset) = pointer.checked_sub(profile) else { return; };
++        let row = offset as usize / PROFILE_ROW_SIZE;
++        if identifier == 0 || row >= PROFILE_ROWS
++            || offset as usize % PROFILE_ROW_SIZE != 0
++            || word(env, pointer) != identifier
++            || !identifiers.insert(identifier) || !locations.insert(row)
++        {
++            log!("[ORDER UP PROFILE v17] Native ID capture skipped: definition={} id=0x{:x} row_pointer=0x{:x} stored_id=0x{:x}",
++                index, identifier, pointer, word(env, pointer));
++            return;
++        }
++        rows.push((row, identifier));
++        definitions.push((object, identifier));
++    }
++    log!("[ORDER UP PROFILE v17] Captured {} original initialized restaurant IDs in profile=0x{:x}; flags/progress untouched.", rows.len(), profile);
++    env.libc_state.order_up.profile_identity = Some(ProfileIdentity {
++        manager, profile, rows, definitions,
++    });
++}
++
++// A legacy save can overwrite the initialized table with zero identifiers.
++// Restore only the identity words, and only when every restaurant ID is zero.
++// Never set purchase bits, reset a row, or replay the destructive initializer.
++fn restore_profile_ids(profile: &mut [u8], rows: &[(usize, u32)]) -> bool {
++    if profile.len() != PROFILE_SIZE || rows.is_empty() || rows.len() > 16 {
++        return false;
++    }
++    let mut identifiers = HashSet::new();
++    let mut locations = HashSet::new();
++    if rows.iter().any(|&(row, identifier)| row >= PROFILE_ROWS || identifier == 0
++        || !identifiers.insert(identifier) || !locations.insert(row))
++    {
++        return false;
++    }
++    if (0..PROFILE_ROWS).any(|row| {
++        let at = row * PROFILE_ROW_SIZE;
++        profile[at..at + 4] != [0; 4]
++    }) {
++        return false;
++    }
++    for &(row, identifier) in rows {
++        let at = row * PROFILE_ROW_SIZE;
++        profile[at..at + 4].copy_from_slice(&identifier.to_le_bytes());
++    }
++    true
++}
++
++fn recover_profile_identity(env: &mut Environment, slide: u32) {
++    let Some(identity) = env.libc_state.order_up.profile_identity.clone() else {
++        return;
++    };
++    if word(env, slide + 0x656a70) != identity.manager
++        || word(env, slide + 0x656a74) != identity.profile
++        || word(env, identity.manager + 8) as usize != identity.definitions.len()
++        || identity.definitions.iter().any(|&(object, identifier)| {
++            word(env, object + 0x18) != identifier
++        })
++    {
++        return;
++    }
++    let profile = env.mem.bytes_at_mut(
++        MutPtr::from_bits(identity.profile), PROFILE_SIZE as u32,
++    );
++    if restore_profile_ids(profile, &identity.rows) {
++        env.libc_state.order_up.identity_recoveries += 1;
++        log!("[ORDER UP PROFILE v17] Restored {} original IDs after an all-zero table overwrite (recovery={}); purchase flags, coins, chef and day progress unchanged.",
++            identity.rows.len(), env.libc_state.order_up.identity_recoveries);
++    }
++}
++
+ // Observe the game's original ownership table; never change purchase state.
+ fn purchase_snapshot(env: &Environment, slide: u32, phase: &str, candidate_id: u32) {
+     let manager = word(env, slide + 0x656a70);
+@@ -246,8 +357,9 @@
+     {
+         return;
+     }
+-    log!("[ORDER UP PURCHASE v16] phase={} candidate_id=0x{:x} count={} profile=0x{:x}",
+-        phase, candidate_id, count, profile);
++    log!("[ORDER UP PURCHASE v16] phase={} candidate_id=0x{:x} count={} profile=0x{:x} table_mode=0x{:x}",
++        phase, candidate_id, count, profile,
++        env.mem.read(ConstPtr::<u8>::from_bits(manager + 0x1e)));
+     for index in 0..count {
+         let object = word(env, entries + index * 4);
+         let row = profile + index * 0xca0;
+@@ -265,6 +377,9 @@
+     let Some(slide) = matching_slide(env) else { return; };
+     let Some(site) = env.cpu.regs()[Cpu::LR].checked_sub(slide) else { return; };
+     let address = frame.to_bits();
++    if matches!(site, 0xbc888 | 0xbf568 | 0x157774) {
++        recover_profile_identity(env, slide);
++    }
+     if site == 0xbf568 && env.libc_state.order_up.purchase_events < 16 {
+         env.libc_state.order_up.purchase_events += 1;
+         env.libc_state.order_up.purchase_frames.insert(address);
+@@ -293,6 +408,7 @@
+     }
+     if env.libc_state.order_up.init_frames.remove(&address) {
+         snapshot(env, slide, "initializer-exit");
++        capture_profile_identity(env, slide);
+     }
+     if let Some(result) = env.libc_state.order_up.module_frames.remove(&address) {
+         let module = word(env, result);
+@@ -346,3 +462,74 @@
+     env.libc_state.order_up.shader_events += 1;
+     env.libc_state.order_up.shader_events <= 256
+ }
++
++
++#[cfg(test)]
++mod profile_identity_tests {
++    use super::{restore_profile_ids, PROFILE_ROWS, PROFILE_ROW_SIZE, PROFILE_SIZE};
++
++    fn legacy_profile() -> Vec<u8> {
++        // Keep recognizable nonzero chef, day, money, and restaurant progress.
++        let mut bytes: Vec<_> = (0..PROFILE_SIZE)
++            .map(|index| ((index * 37 + 19) % 251) as u8).collect();
++        for row in 0..PROFILE_ROWS {
++            bytes[row * PROFILE_ROW_SIZE..row * PROFILE_ROW_SIZE + 4].fill(0);
++        }
++        bytes
++    }
++
++    #[test]
++    fn restores_native_ids_without_changing_any_progress_or_purchase_flag() {
++        let rows = [(0, 0x12345678), (2, 0xf789083e), (7, 0x87654321)];
++        let mut profile = legacy_profile();
++        let before = profile.clone();
++        assert!(restore_profile_ids(&mut profile, &rows));
++        for (index, (&old, &new)) in before.iter().zip(&profile).enumerate() {
++            if let Some(&(row, identifier)) = rows.iter().find(|&&(row, _)| {
++                (row * PROFILE_ROW_SIZE..row * PROFILE_ROW_SIZE + 4).contains(&index)
++            }) {
++                assert_eq!(new, identifier.to_le_bytes()[index - row * PROFILE_ROW_SIZE]);
++            } else {
++                assert_eq!(new, old, "unexpected change at profile byte {index:#x}");
++            }
++        }
++        // Re-entering the shop must leave an already repaired table alone.
++        let repaired = profile.clone();
++        assert!(!restore_profile_ids(&mut profile, &rows));
++        assert_eq!(profile, repaired);
++    }
++
++    #[test]
++    fn refuses_partial_or_existing_profiles_including_unused_rows() {
++        for row in [0, 2, 23] {
++            let mut profile = legacy_profile();
++            profile[row * PROFILE_ROW_SIZE..row * PROFILE_ROW_SIZE + 4]
++                .copy_from_slice(&0xaabbccdd_u32.to_le_bytes());
++            let before = profile.clone();
++            assert!(!restore_profile_ids(&mut profile, &[(2, 0xf789083e)]));
++            assert_eq!(profile, before);
++        }
++    }
++
++    #[test]
++    fn rejects_ambiguous_native_mappings_without_a_partial_write() {
++        for rows in [vec![], vec![(0, 0)], vec![(24, 1)],
++            vec![(0, 1), (0, 2)], vec![(0, 1), (1, 1)],
++            (0..17).map(|row| (row, row as u32 + 1)).collect()]
++        {
++            let mut profile = legacy_profile();
++            let before = profile.clone();
++            assert!(!restore_profile_ids(&mut profile, &rows));
++            assert_eq!(profile, before);
++        }
++    }
++
++    #[test]
++    fn rejects_wrong_profile_lengths_without_writing() {
++        for length in [0, PROFILE_ROW_SIZE, PROFILE_SIZE - 1, PROFILE_SIZE + 1] {
++            let mut profile = vec![0; length];
++            assert!(!restore_profile_ids(&mut profile, &[(0, 1)]));
++            assert_eq!(profile, vec![0; length]);
++        }
++    }
++}

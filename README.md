@@ -1,3 +1,30 @@
+# Order Up!! V17 profile identity recovery
+
+V16's phone log confirms the full Gravy Chug name now formats correctly, but all
+eight loaded restaurant profile entries have zero IDs at purchase. The original game's
+purchase routine searches those IDs before setting the purchased bit. It still
+shows its success message when no matching row exists.
+
+V17 records the IDs and exact save-row locations produced by the game's original
+restaurant initializer. Before an ownership query, purchase, or level load, it
+can restore those ID words only if all 24 current ID slots are zero, the profile
+pointer is unchanged, and the original restaurant definitions still match. The
+recovery does not set purchased/unlocked bits, reset the profile, modify currency,
+or alter chef/day/restaurant progress. The original game performs the purchase.
+It skips recovery if native identity capture or any validation fails.
+
+Validation is pending in the V17 Actions runs. Four profile tests check byte-for-
+byte preservation, repeat calls, existing/partial profiles, and ambiguous mappings.
+The prior 16 guest formatter checks are also run. Purchasing on the user's iPhone
+is not yet confirmed. Logs report native capture, recovery, and original before/
+after purchase state.
+
+Install over the existing Applesauce HLE Test app to retain its imported game and
+save data, enable JIT as before, and try the purchase once. The package contains
+only the emulator; it does not contain Order Up game files.
+
+## Previous V16 validation and build
+
 # Applesauce HLE Rendering Test
 
 Experimental, unsigned iPhone build for investigating Order Up!! rendering.
