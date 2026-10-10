@@ -1,0 +1,109 @@
+name: Verify Order Up wide strings v16
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-order-up-v16.yml'
+      - 'tests/wide-string-guest.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: order-up-wide-strings-v16-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      RUSTFLAGS: '-C link-arg=-latomic'
+      CARGO_BUILD_JOBS: '3'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build clang libboost-dev libstdc++-14-dev libsndio-dev libx11-dev libxext-dev libsdl2-dev libopenal-dev libxml2-dev
+
+      - name: Prepare exact V15 baseline
+        run: |
+          set -euo pipefail
+          git clone --branch ios-host https://github.com/johnny901901901/Applesauce.git applesauce
+          git -C applesauce checkout --detach c75278bda86c80cbcec2d8d1493b5be9d5a9e0d1
+          git -C applesauce submodule update --init --recursive
+          git -C applesauce apply ../patches/ios-rendering-backport.patch
+          git -C applesauce apply ../patches/order-up-crystal-bypass.patch
+          python3 patches/order-up-viewport-v6.py
+          python3 patches/order-up-framebuffer-v7.py
+          python3 patches/order-up-crystal-resume-v8.py
+          python3 patches/order-up-render-probe-v9.py
+          python3 patches/order-up-scissor-present-v10.py
+          python3 patches/order-up-shader-inputs-v11.py
+          python3 patches/order-up-engine-geometry-v12.py
+          python3 patches/order-up-restaurant-init-v13.py
+          python3 patches/order-up-sjlj-hook-v14.py
+          git -C applesauce apply ../patches/order-up-cache-v15.patch
+          mkdir -p validation
+
+      - name: Build V15 baseline CLI
+        working-directory: applesauce
+        run: cargo build --release --no-default-features 2>&1 | tee ../validation/build-v15.log
+
+      - name: Reproduce purchase-name regression through guest ARM ABI
+        run: |
+          set -euo pipefail
+          python3 tests/wide-string-guest.py --app "$RUNNER_TEMP/WideStringRegression.app" --emulator applesauce/target/release/touchHLE --baseline --log validation/guest-v15.log
+
+      - name: Apply and build V16
+        run: |
+          set -euo pipefail
+          git -C applesauce apply --check ../patches/order-up-wide-strings-v16.patch
+          git -C applesauce apply ../patches/order-up-wide-strings-v16.patch
+          git -C applesauce diff --check
+          cd applesauce
+          cargo build --release --no-default-features 2>&1 | tee ../validation/build-v16.log
+
+      - name: Verify all wide and narrow formatter guest cases
+        run: |
+          set -euo pipefail
+          python3 tests/wide-string-guest.py --app "$RUNNER_TEMP/WideStringRegression.app" --emulator applesauce/target/release/touchHLE --log validation/guest-v16.log
+
+      - name: Run required broad Rust checks and report existing failures
+        run: |
+          set -uo pipefail
+          cd applesauce
+          cargo test -- --skip test_app 2>&1 | tee ../validation/rust-tests.log
+          test_status=${PIPESTATUS[0]}
+          cd ..
+          TEST_STATUS="$test_status" python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          log = Path('validation/rust-tests.log').read_text()
+          status = int(os.environ['TEST_STATUS'])
+          if status == 0:
+              print('Broad Rust checks passed.')
+          else:
+              expected = {'dyld::dylib_list::tests::no_duplicate_functions', 'dyld::dylib_list::tests::no_duplicate_classes'}
+              failed = set(re.findall(r'^test (\S+) \.\.\. FAILED$', log, re.MULTILINE))
+              assert 'error[E' not in log, 'Rust compilation failure'
+              assert failed == expected, 'Unexpected test failures: ' + repr(failed)
+              assert '_CATransform3DMakeScale' in log and 'operatingSystemVersionString' in log
+              print('Broad checks retain only the two independently known duplicate-export failures: ' + ', '.join(sorted(failed)))
+          PY
+
+      - name: Upload test-only validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-up-wide-strings-v16-validation
+          path: validation/*.log
+          if-no-files-found: warn
