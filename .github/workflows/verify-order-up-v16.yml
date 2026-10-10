@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/verify-order-up-v16.yml'
+      - 'patches/order-up-wide-strings-v16.patch'
       - 'tests/wide-string-guest.py'
 
 permissions:
@@ -81,8 +81,11 @@ jobs:
         run: |
           set -uo pipefail
           cd applesauce
+          # The runner starts bash with -e; capture cargo's status before reporting.
+          set +e
           cargo test -- --skip test_app 2>&1 | tee ../validation/rust-tests.log
           test_status=${PIPESTATUS[0]}
+          set -e
           cd ..
           TEST_STATUS="$test_status" python3 - <<'PY'
           import os, re

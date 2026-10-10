@@ -33,7 +33,13 @@ guest regression fails the purchase-name case on V15, then passes all 16
 cases on V16. It exercises the real emulator ABI and formatter entry points,
 including argument order, precision, padding, Unicode counts, output capacity
 and plain narrow strings. The test contains no original game executable or
-assets. The required broader Rust checks are still running.
+assets. The required broad Rust run completed with 66 passes and the same two
+existing failures: duplicate `_CATransform3DMakeScale` and duplicate
+`NSProcessInfo.operatingSystemVersionString`. V16 changes neither export.
+The original regression job is marked failed because its shell exited at the
+known failing broad tests before the reporting step could classify them;
+all 16 formatter cases passed. The reporting step now captures that exit
+status before checking the exact known failures for future runs.
 
 On-device restaurant purchasing remains unverified, so this remains a
 purchase-diagnostic candidate. The successful checks verify the formatter fix
