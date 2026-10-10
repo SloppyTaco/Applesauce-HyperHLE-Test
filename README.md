@@ -1,3 +1,48 @@
+# Order Up!! V18: alert dismissal and private offline Gravy Chug content
+
+The user confirmed that V17 purchases Gravy Chug correctly. Entering it opens
+an alert asking to download the free restaurant content and then freezes.
+The original ChefDownloadManager guest callback at `0x1b567c` explicitly calls
+`dismissWithClickedButtonIndex:animated:`. The base emulator incorrectly sends
+`clickedButtonAtIndex:` from programmatic dismissal, re-entering that same
+callback. An independent ARMv7 guest reproduced this exact recursion on V17.
+
+V18 separates user-click delivery from programmatic dismissal, makes dismissal
+idempotent before delegate calls, and retains alert/delegate lifetime across
+callbacks. SDL also uses a bounded native run-loop turn after button selection
+and no longer resets a selection after presentation. The native dialog is still
+modal; this is a targeted callback fix, not a claim of full asynchronous UIKit.
+
+The user's 1.0 package contains Chef.wad but no Diner.wad. Their supplied 1.62
+archive contains the Diner and shared v4 WADs. A PRIVATE offline pack keeps the
+Diner payload intact and combines the disjoint Common_v1/Common_v2 resource
+indices into the original engine's Common.wad name. It includes their stream
+assets. No copyrighted game bytes are committed to or uploaded through GitHub.
+The final user-specific IPA gets the private resource locally after the emulator
+build. This is a cross-version data port; actual 1.0 restaurant gameplay still
+requires iPhone testing, and container/hash checks do not establish full game
+compatibility.
+
+The executable-guarded installer verifies the exact pack, every payload digest,
+safe path, entry count and bounded sizes before changing cached content. It
+stages and checks files, preserves original-version stream assets, backs up any
+other replaced cached content, rolls back failed publication, and creates only
+the original diner/common completion indicators after successful installation.
+It never replaces Chef.wad, edits the profile, changes purchase/unlock bits,
+changes currency, or resets progress. Only verified local diner/common package
+checks bypass the obsolete remote download dictionary; other downloads stay
+unchanged. Without the pack, the emulator never reports a completed download.
+
+The same V18 binary can also read the exact pack from the guest's Documents
+folder; content does not require another emulator build. A read-only CLI check
+is available as `--check-order-up-offline-pack=PATH` for private validation.
+
+V18 retains the complete V17 patch chain and the same test-app bundle ID:
+`io.github.sloppytaco.applesaucehyperhletest`. Install over the existing app,
+not as a fresh app, to retain imports and saves. The host version is 18.0.0 (18).
+
+## Previous V17 validation
+
 # Order Up!! V17 profile identity recovery
 
 V16's phone log confirms the full Gravy Chug name now formats correctly, but all
@@ -21,7 +66,7 @@ ARMv7 guest formatter cases also passed through the real emulator ABI.
 The broad Rust checks recorded 70 passes and the same two previously confirmed
 duplicate-export failures (`_CATransform3DMakeScale` and
 `NSProcessInfo.operatingSystemVersionString`); no new failures appeared.
-Purchasing on the user's iPhone is not yet confirmed. Logs report native capture,
+The user subsequently confirmed purchasing on their iPhone works. Logs report native capture,
 recovery, and original before/after purchase state.
 
 Verified V17 iPhone build: [run 38079511023](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38079511023).

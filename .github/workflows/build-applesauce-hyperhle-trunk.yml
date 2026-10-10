@@ -74,6 +74,7 @@ jobs:
           git -C applesauce apply ../patches/order-up-wide-strings-v16.patch
           git -C applesauce apply --check ../patches/order-up-profile-ids-v17.patch
           git -C applesauce apply ../patches/order-up-profile-ids-v17.patch
+          python3 patches/order-up-download-v18.py
           git -C applesauce diff --check
           git -C applesauce diff --stat
 
@@ -92,6 +93,8 @@ jobs:
           verifier.write_text(verifier.read_text().replace('io.github.johnny901901901.applesauce', os.environ['TEST_BUNDLE_ID']))
           PY
           /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Applesauce HLE Test' applesauce/platform/ios/Config/Info.plist
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 18.0.0' applesauce/platform/ios/Config/Info.plist
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 18' applesauce/platform/ios/Config/Info.plist
 
       - name: Build shared SDL for iPhone
         run: |
@@ -120,7 +123,7 @@ jobs:
           {
             echo "Applesauce iOS base: $APPLESAUCE_REF"
             echo "Graphics: targeted HyperHLE-derived backport; not the full trunk core"
-            echo "Order Up: v4 NIB viewDidLoad fix + v5 Crystal UI bypass + v6 viewport correction/trace + v8 synthetic Crystal dismissal/resume + v9 source/draw diagnostics + v10 empty-scissor repair, direct ES2 presentation and display readback + v11 invalid screen_dims repair and shader-input diagnostics + v12 executable-guarded engine geometry repair (phone menu confirmed) + v13 guarded replay of original restaurant initialization for an empty/unselected manager before level setup, with module/nil/shader traces + v14 SjLj observation wrappers retain original guest libgcc behavior and activate the recovery trigger + v15 validate the existing Chef.wad cache and restore only from the exact original archive, preserving the old cache and game saves; green control square removed; v16 correct 32-bit wide-string formatting and observe original purchase/ownership state without altering it; v17 recover an entirely blank restaurant ID table using only identities recorded from the original initializer, preserving every other profile byte"
+            echo "Order Up: v4 NIB viewDidLoad fix + v5 Crystal UI bypass + v6 viewport correction/trace + v8 synthetic Crystal dismissal/resume + v9 source/draw diagnostics + v10 empty-scissor repair, direct ES2 presentation and display readback + v11 invalid screen_dims repair and shader-input diagnostics + v12 executable-guarded engine geometry repair (phone menu confirmed) + v13 guarded replay of original restaurant initialization for an empty/unselected manager before level setup, with module/nil/shader traces + v14 SjLj observation wrappers retain original guest libgcc behavior and activate the recovery trigger + v15 validate the existing Chef.wad cache and restore only from the exact original archive, preserving the old cache and game saves; green control square removed; v16 correct 32-bit wide-string formatting and observe original purchase/ownership state without altering it; v17 recover an entirely blank restaurant ID table using only identities recorded from the original initializer, preserving every other profile byte; v18 separate native button clicks from guarded programmatic alert dismissal to prevent the confirmed recursive callback freeze, and verify/install a private Diner/Common content pack without altering original Chef.wad, purchases or saves"
             echo "Build configuration: $GITHUB_SHA"
             echo "Bundle ID: $TEST_BUNDLE_ID"
             shasum -a 256 ../patches/ios-rendering-backport.patch
@@ -137,9 +140,10 @@ jobs:
             shasum -a 256 ../patches/order-up-cache-v15.patch
             shasum -a 256 ../patches/order-up-wide-strings-v16.patch
             shasum -a 256 ../patches/order-up-profile-ids-v17.patch
+            shasum -a 256 ../patches/order-up-download-v18.py
           } > dist/BUILD_INFO.txt
 
-      - name: Check emulator-only package and compiled V16 code
+      - name: Check emulator-only package and compiled V18 code
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -158,15 +162,16 @@ jobs:
               assert struct.unpack_from('<II', core) == (0xFEEDFACF, 0x0100000C)
               for marker in (b'[ORDER UP FORMAT v16]', b'[ORDER UP PURCHASE v16]',
                              b'[ORDER UP OWNERSHIP v16]', b'[ORDER UP CACHE v15]',
-                             b'[ORDER UP PROFILE v17]'):
+                             b'[ORDER UP PROFILE v17]', b'[ORDER UP DOWNLOAD v18]',
+                             b'[ALERT CALLBACK v18]'):
                   assert marker in core, marker
-          print('Verified ARM64 V17 emulator package without private game assets.')
+          print('Verified ARM64 V18 emulator package without private game assets.')
           PY
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Applesauce-HLE-Rendering-Test-v17
+          name: Applesauce-HLE-Rendering-Test-v18
           path: |
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa.sha256
