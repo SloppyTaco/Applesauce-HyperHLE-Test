@@ -41,6 +41,36 @@ V18 retains the complete V17 patch chain and the same test-app bundle ID:
 `io.github.sloppytaco.applesaucehyperhletest`. Install over the existing app,
 not as a fresh app, to retain imports and saves. The host version is 18.0.0 (18).
 
+## Verified V18 build and private package
+
+The [iPhone build 38085250715](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38085250715)
+and [regression run 38085250794](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38085250794)
+both passed using source commit `e7d2d0f5891abd89be3aa875363244f0ae403973`.
+V17 reproduced recursive clicked-button delivery; V18 passed all four independent
+ARMv7 alert cases, four private-content safety tests, four existing profile
+preservation tests, and all 16 formatter guest cases. Broad Rust checks recorded
+74 passes and only the same two pre-existing duplicate-export failures noted
+below; there were no new failures.
+
+The compiled Linux V18 decoder locally validated all 1,992 private assets.
+The original 1.0 guest also exercised the real installer in a fresh isolated
+sandbox: the first launch published the missing/replacement assets, retained
+all 76 original streams and original Chef.wad, preserved a Documents save-data
+sentinel, and backed up both previous test WADs. The second launch published
+zero files and retained all 1,992 installed assets. These launches deliberately
+used headless mode and stopped when the game requested a window; they establish
+installation/preservation, NOT restaurant gameplay or iPhone compatibility.
+
+The user-specific final file is `Applesauce-OrderUp-v18.ipa`, 97,450,380 bytes,
+SHA-256 `8988a927d80911cf556f3825304092d9ffdf76ecdf3f0b193e4053b84ef707b4`.
+Its archive integrity, all 15 patch hashes, exact bundled offline resource,
+unchanged ARM64 host/core, V15-V18 markers, optimized native pack-digest
+comparison, and same bundle identity/version were verified after packaging.
+It includes the offline pack; the public GitHub emulator artifact intentionally
+does not. AltStore must re-sign the private IPA. Install OVER V17, keep the
+existing imported 1.0 game and saves, and enable JIT as before. The newer-asset
+port still needs a real iPhone Gravy Chug test.
+
 ## Previous V17 validation
 
 # Order Up!! V17 profile identity recovery
