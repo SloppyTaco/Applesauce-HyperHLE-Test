@@ -24,7 +24,7 @@ env:
 
 jobs:
   build:
-    runs-on: macos-15-arm64
+    runs-on: macos-15
     timeout-minutes: 90
     defaults:
       run:
@@ -135,7 +135,7 @@ jobs:
             echo "Graphics: targeted HyperHLE-derived backport; not the full trunk core"
             echo "Order Up: v4 NIB viewDidLoad fix + v5 Crystal UI bypass + v6 viewport correction/trace + v8 synthetic Crystal dismissal/resume + v9 source/draw diagnostics + v10 empty-scissor repair, direct ES2 presentation and display readback + v11 invalid screen_dims repair and shader-input diagnostics + v12 executable-guarded engine geometry repair (phone menu confirmed) + v13 guarded replay of original restaurant initialization for an empty/unselected manager before level setup, with module/nil/shader traces + v14 SjLj observation wrappers retain original guest libgcc behavior and activate the recovery trigger + v15 validate the existing Chef.wad cache and restore only from the exact original archive, preserving the old cache and game saves; green control square removed; v16 correct 32-bit wide-string formatting and observe original purchase/ownership state without altering it; v17 recover an entirely blank restaurant ID table using only identities recorded from the original initializer, preserving every other profile byte; v18 separate native button clicks from guarded programmatic alert dismissal to prevent the confirmed recursive callback freeze, and verify/install a private Diner/Common content pack without altering original Chef.wad, purchases or saves"
             echo "Build configuration: $GITHUB_SHA"
-            echo "Builder: macos-15-arm64 with Xcode 26.3 and iOS 26.2 SDK, explicitly selected from the official supported runner image."
+            echo "Builder: macos-15 (ARM64) with Xcode 26.3 and iOS 26.2 SDK, explicitly selected from the official supported runner image."
             echo "V19: buttonless loading alerts return immediately and retain their presentation until original game dismissal; existing V18 button prompts and the complete previous patch chain are retained. This first 1.41 startup fix does not port 1.0-specific recovery or claim full 1.41 gameplay compatibility."
             echo "V20: button alerts return immediately on iOS; copied UIKit state records one real user selection for delivery on the guest main run loop. Dedicated non-animated alert window sits above game controls. Programmatic dismissal, duplicate events and core exit cancel native state/timers without synthetic clicks. Existing loading, callbacks, private-pack guards and original 1.0 fallback are preserved."
             echo "Native UIKit simulator state/event-boundary cases: 4 passed; actual phone tap and full 1.41 gameplay still need user verification."
