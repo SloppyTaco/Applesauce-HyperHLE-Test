@@ -189,18 +189,18 @@ shutil.copyfile(Path(__file__).with_name('async-alert-uikit-v20.inc'),
                 Path('applesauce') / Path(SDL).with_name('SDL_touchhle_asyncalert_v20.inc'))
 edit(SDL, '#endif /* SDL_VIDEO_DRIVER_UIKIT */', '''#include "SDL_touchhle_asyncalert_v20.inc"
 
-/* Explicit default visibility: these four entry points live in shared SDL. */
-SDL_DECLSPEC uint64_t SDLCALL SDL_TOUCHHLE_AlertBeginV20(SDL_Window *parent,
+/* SDL 2 uses DECLSPEC for default visibility (SDL_DECLSPEC is SDL 3). */
+DECLSPEC uint64_t SDLCALL SDL_TOUCHHLE_AlertBeginV20(SDL_Window *parent,
     const char *title, const char *message, const char *const *buttons, int count)
 {
     SDL_WindowData *data = parent ? (__bridge SDL_WindowData *)parent->driverdata : nil;
     return TouchHLE_BeginAsyncAlertV20(data.uiwindow, title, message, buttons, count);
 }
-SDL_DECLSPEC int SDLCALL SDL_TOUCHHLE_AlertPollV20(uint64_t token)
+DECLSPEC int SDLCALL SDL_TOUCHHLE_AlertPollV20(uint64_t token)
 { return TouchHLE_PollAsyncAlertV20(token); }
-SDL_DECLSPEC void SDLCALL SDL_TOUCHHLE_AlertDismissV20(uint64_t token)
+DECLSPEC void SDLCALL SDL_TOUCHHLE_AlertDismissV20(uint64_t token)
 { TouchHLE_DismissAsyncAlertV20(token); }
-SDL_DECLSPEC void SDLCALL SDL_TOUCHHLE_AlertResetV20(void)
+DECLSPEC void SDLCALL SDL_TOUCHHLE_AlertResetV20(void)
 { TouchHLE_ResetAsyncAlertsV20(); }
 
 #endif /* SDL_VIDEO_DRIVER_UIKIT */''')
