@@ -1,0 +1,188 @@
+name: Verify guarded DLC support and preserved lifetime fixes v22
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'patches/order-up-dlc-v22.py'
+      - 'patches/order-up-dlc-v22.rs'
+      - 'tests/application-loop-guest.py'
+      - '.github/workflows/verify-order-up-v22.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: order-up-application-v22-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      RUSTFLAGS: '-C link-arg=-latomic'
+      CARGO_BUILD_JOBS: '3'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      ALSOFT_DRIVERS: 'null'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build and virtual-display dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build clang libboost-dev libstdc++-14-dev libsndio-dev libx11-dev libxext-dev libsdl2-dev libopenal-dev libxml2-dev xvfb xauth libgles1 libgles2 libegl1 libgl1-mesa-dri
+
+      - name: Prepare exact V18 source and complete previous patch chain
+        run: |
+          set -euo pipefail
+          git clone --branch ios-host https://github.com/johnny901901901/Applesauce.git applesauce
+          git -C applesauce checkout --detach c75278bda86c80cbcec2d8d1493b5be9d5a9e0d1
+          git -C applesauce submodule update --init --recursive
+          git -C applesauce apply ../patches/ios-rendering-backport.patch
+          git -C applesauce apply ../patches/order-up-crystal-bypass.patch
+          python3 patches/order-up-viewport-v6.py
+          python3 patches/order-up-framebuffer-v7.py
+          python3 patches/order-up-crystal-resume-v8.py
+          python3 patches/order-up-render-probe-v9.py
+          python3 patches/order-up-scissor-present-v10.py
+          python3 patches/order-up-shader-inputs-v11.py
+          python3 patches/order-up-engine-geometry-v12.py
+          python3 patches/order-up-restaurant-init-v13.py
+          python3 patches/order-up-sjlj-hook-v14.py
+          git -C applesauce apply ../patches/order-up-cache-v15.patch
+          git -C applesauce apply ../patches/order-up-wide-strings-v16.patch
+          git -C applesauce apply ../patches/order-up-profile-ids-v17.patch
+          python3 patches/order-up-download-v18.py
+          git -C applesauce diff --check
+          mkdir -p validation
+
+      - name: Download the verified unchanged V20 baseline CLI
+        uses: actions/download-artifact@v4
+        with:
+          name: Applesauce-Linux-CLI-v20
+          path: baseline-v20
+          run-id: 38149645355
+          github-token: ${{ github.token }}
+
+      - name: Verify the exact V20 baseline bytes
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          binary = Path('baseline-v20/touchHLE')
+          data = binary.read_bytes()
+          assert hashlib.sha256(data).hexdigest() == '6abe352c30d7b2571eed6eddcf2f638caa44e616cb76fabf90100db17c9a8215'
+          assert b'[ALERT ASYNC v20]' in data and b'[ORDER UP DOWNLOAD v18]' in data
+          assert b'[APPLICATION LOOP v21]' not in data
+          binary.chmod(0o755)
+          print('Exact V20 baseline verified; source b7860b3be2decb4b48fedc3f620eaa0b67f26ef9.')
+          PY
+
+      - name: Reproduce V20 UIApplicationMain early return after temporary stop
+        run: |
+          set -euo pipefail
+          python3 tests/application-loop-guest.py --app "$RUNNER_TEMP/ApplicationBaseline.app" --emulator baseline-v20/touchHLE --baseline --log validation/application-v20-baseline.log
+
+      - name: Apply and build V22
+        run: |
+          set -euo pipefail
+          python3 patches/order-up-loading-v19.py
+          python3 patches/order-up-alerts-v20.py
+          python3 patches/order-up-application-loop-v21.py
+          python3 patches/order-up-dlc-v22.py
+          git -C applesauce diff --check
+          cd applesauce
+          cargo build --release --no-default-features 2>&1 | tee ../validation/build-v22.log
+
+      - name: Verify application dispatch continues after stopped activation
+        run: |
+          set -euo pipefail
+          python3 tests/application-loop-guest.py --app "$RUNNER_TEMP/ApplicationLifetime.app" --emulator applesauce/target/release/touchHLE --require-v21 --log validation/application-v22-main.log
+
+      - name: Preserve ordinary and nested CFRunLoopStop callers and genuine exit
+        run: |
+          set -euo pipefail
+          python3 tests/application-loop-guest.py --app "$RUNNER_TEMP/DirectLoopStop.app" --emulator applesauce/target/release/touchHLE --direct-stop --require-v21 --log validation/application-v22-direct.log
+          python3 tests/application-loop-guest.py --app "$RUNNER_TEMP/NestedLoopStop.app" --emulator applesauce/target/release/touchHLE --nested-stop --require-v21 --log validation/application-v22-nested.log
+          python3 tests/application-loop-guest.py --app "$RUNNER_TEMP/GenuineGuestExit.app" --emulator applesauce/target/release/touchHLE --genuine-exit --require-v21 --log validation/application-v22-exit.log
+
+      - name: Verify native loading alert returns and guest timer completes
+        run: |
+          set -euo pipefail
+          xvfb-run -a python3 tests/loading-alert-guest.py --app "$RUNNER_TEMP/LoadingRegression.app" --emulator applesauce/target/release/touchHLE --graphical --log validation/loading-v22-graphical.log
+
+      - name: Verify loading alert ownership in headless mode
+        run: |
+          set -euo pipefail
+          python3 tests/loading-alert-guest.py --app "$RUNNER_TEMP/LoadingHeadless.app" --emulator applesauce/target/release/touchHLE --log validation/loading-v22-headless.log
+
+      - name: Verify real ARMv7 async button-alert timers and ownership
+        run: |
+          set -euo pipefail
+          python3 tests/async-button-alert-guest.py --app "$RUNNER_TEMP/AsyncButtonAlertRegression.app" --emulator applesauce/target/release/touchHLE --log validation/async-button-v22.log
+
+      - name: Preserve V18 real guest button and dismissal callbacks
+        run: |
+          set -euo pipefail
+          python3 tests/alert-dismissal-guest.py --app "$RUNNER_TEMP/AlertRegression.app" --emulator applesauce/target/release/touchHLE --log validation/alert-v22.log
+
+      - name: Verify private content and save-preservation checks
+        working-directory: applesauce
+        run: |
+          set -euo pipefail
+          cargo test order_up_download::tests -- --nocapture 2>&1 | tee ../validation/download-v22-tests.log
+          cargo test order_up_dlc_v22::tests -- --nocapture 2>&1 | tee ../validation/dlc-v22-tests.log
+          cargo test order_up::profile_identity_tests -- --nocapture 2>&1 | tee ../validation/profile-id-tests.log
+
+      - name: Verify wide and narrow formatter guest cases
+        run: |
+          set -euo pipefail
+          python3 tests/wide-string-guest.py --app "$RUNNER_TEMP/WideStringRegression.app" --emulator applesauce/target/release/touchHLE --log validation/guest-v22.log
+
+      - name: Run required broad Rust checks and report existing failures
+        run: |
+          set -uo pipefail
+          cd applesauce
+          set +e
+          cargo test -- --skip test_app 2>&1 | tee ../validation/rust-tests.log
+          test_status=${PIPESTATUS[0]}
+          set -e
+          cd ..
+          TEST_STATUS="$test_status" python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          log = Path('validation/rust-tests.log').read_text()
+          status = int(os.environ['TEST_STATUS'])
+          if status == 0:
+              print('Broad Rust checks passed.')
+          else:
+              expected = {'dyld::dylib_list::tests::no_duplicate_functions', 'dyld::dylib_list::tests::no_duplicate_classes'}
+              failed = set(re.findall(r'^test (\S+) \.\.\. FAILED$', log, re.MULTILINE))
+              assert 'error[E' not in log, 'Rust compilation failure'
+              assert failed == expected, 'Unexpected test failures: ' + repr(failed)
+              assert '_CATransform3DMakeScale' in log and 'operatingSystemVersionString' in log
+              print('Only the two known duplicate-export failures remain: ' + ', '.join(sorted(failed)))
+          PY
+
+      - name: Upload test-only validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-up-application-v22-validation
+          path: validation/*.log
+          if-no-files-found: warn
+
+      - name: Upload source-built Linux emulator
+        uses: actions/upload-artifact@v4
+        with:
+          name: Applesauce-Linux-CLI-v22
+          path: applesauce/target/release/touchHLE
+          if-no-files-found: error

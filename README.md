@@ -1,4 +1,34 @@
-# Order Up!! V21: application-loop lifetime correction
+# Order Up!! V22: native buttons and private 1.41 DLC
+
+The user confirmed V21 fully loads 1.41. Their next phone log continues
+rendering while a native Download prompt disappears without a selected-button
+record or guest callback. The previous native state fixture called the recording
+helper directly and did not cover the real UIKit action/dismissal path while
+the emulator occupies a main GCD block.
+
+V22 uses ordinary public UIButton target/action in a dedicated non-animated
+card. It retains copied ownership, token isolation, queuing, exactly-once guest
+polling and cleanup, without synthetic selection. New public XCUI fixtures
+exercise Download/Cancel taps and game-input restoration with the exact SDL
+default/tracking run-loop turns, alongside the four original state cases.
+The workflow gates release on their results, not just on successful compilation.
+
+A separate PRIVATE 689-asset pack contains Marketplace.wad, eleven missing
+assistant WADs and their audio from the user's supplied 1.62 archive. Their v4
+container format and 1.41 resource identifiers match; this is a cross-version
+data port and those checks do not prove actual map/assistant gameplay.
+No copyrighted game bytes or guest executable are published here.
+
+The installer requires the exact supplied 1.41 executable and exact pack. It
+checks every payload, stages changes, backs up replaced cache content, rolls
+back publication failures and only then writes the game's genuine completion
+indicators. Base Chef/Common WADs, built-in Fry Guy, saves/profile, purchases,
+hiring rules and currency are untouched. Only verified local package checks
+may bypass obsolete server metadata; missing/damaged packs do not claim success.
+The V18 1.0 pack/guards and phone-confirmed V21 startup fix remain unchanged.
+Same host bundle ID: install over the current app, do not uninstall it.
+
+## Retained V21 application-loop lifetime correction
 
 The user's V20 phone log shows the startup promotion popup returns, the guest
 timer finishes, and the app exits with status `806421216` (`0x301102e0`), the
