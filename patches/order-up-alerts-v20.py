@@ -204,11 +204,13 @@ SDL_DECLSPEC void SDLCALL SDL_TOUCHHLE_AlertResetV20(void)
 { TouchHLE_ResetAsyncAlertsV20(); }
 
 #endif /* SDL_VIDEO_DRIVER_UIKIT */''')
-edit('src/lib.rs', 'pub fn clear_host_exit_request() {', '''#[cfg(target_os = "ios")]
+edit('src/lib.rs', '''#[cfg(target_os = "ios")]
+pub fn clear_host_exit_request() {''', '''#[cfg(target_os = "ios")]
 pub fn reset_native_host_alerts() {
     window::reset_async_alerts();
 }
 
+#[cfg(target_os = "ios")]
 pub fn clear_host_exit_request() {''')
 edit('platform/ios/rust-entry/src/lib.rs', '''    touchHLE::clear_host_exit_request();''', '''    touchHLE::reset_native_host_alerts();
     touchHLE::clear_host_exit_request();''')

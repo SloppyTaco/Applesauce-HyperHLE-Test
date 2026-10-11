@@ -6,6 +6,7 @@ import platform
 import plistlib
 import subprocess
 import tempfile
+import time
 
 
 def run(*arguments, **kwargs):
@@ -51,15 +52,32 @@ def main():
             str(Path(__file__).with_name('native-alert-v20.m')), '-o', str(app / 'AlertV20'))
         run('codesign', '--force', '--sign', '-', str(app))
         run('xcrun', 'simctl', 'install', udid, str(app))
-        launched = subprocess.run(['xcrun', 'simctl', 'launch', '--console', udid,
+        launched = subprocess.run(['xcrun', 'simctl', 'launch', udid,
             info['CFBundleIdentifier']], text=True, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, timeout=90)
+        container = run('xcrun', 'simctl', 'get_app_container', udid,
+            info['CFBundleIdentifier'], 'data', stdout=subprocess.PIPE).stdout.strip()
+        result_file = Path(container) / 'Documents/native-alert-regression.log'
+        deadline = time.monotonic() + 45
+        output = ''
+        while time.monotonic() < deadline:
+            if result_file.is_file():
+                output = result_file.read_text()
+                if 'ALL PASS 4' in output or 'FAIL' in output:
+                    break
+            time.sleep(0.25)
+        if 'ALL PASS 4' not in output:
+            reports = sorted((Path.home() / 'Library/Logs/DiagnosticReports').glob('AlertV20*.ips'),
+                             key=lambda path: path.stat().st_mtime)
+            if reports:
+                output += '\nLatest simulator fixture crash report:\n' + reports[-1].read_text()[-24000:]
+        output += '\nLauncher:\n' + launched.stdout
         args.log.parent.mkdir(parents=True, exist_ok=True)
-        args.log.write_text(launched.stdout)
-        for line in launched.stdout.splitlines():
+        args.log.write_text(output)
+        for line in output.splitlines():
             if '[NATIVE ALERT REGRESSION]' in line: print(line)
-        assert '[NATIVE ALERT REGRESSION] ALL PASS 4' in launched.stdout, launched.stdout[-6000:]
-        assert '[NATIVE ALERT REGRESSION] FAIL' not in launched.stdout
+        assert '[NATIVE ALERT REGRESSION] ALL PASS 4' in output, output[-24000:]
+        assert '[NATIVE ALERT REGRESSION] FAIL' not in output
         print('Four actual UIKit simulator state/event-boundary cases passed; hardware tap still needs phone verification.')
 
 
