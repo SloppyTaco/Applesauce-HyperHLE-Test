@@ -19,8 +19,37 @@ All previous patches, native button event delivery, programmatic dismissal,
 buttonless loading, original 1.0 executable guards and offline-pack checks stay
 unchanged. No save, coin, purchase, first-run flag or private game byte is edited
 by this correction. Version 21.0.0 (21) keeps the same existing test-app identity.
-V21 build and new regression verification are pending; this is not a claim of
-full 1.41 startup/gameplay compatibility or a phone-tested fix.
+Both V21 builds and the new regression verification passed. This is not a claim
+of full 1.41 startup/gameplay compatibility or a phone-tested fix.
+
+## Verified V21 build and private package
+
+The iPhone [run 38152812767](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38152812767)
+and regression [run 38152812772](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38152812772)
+both passed from source `02894ccad42fb7d0edbb1f3b9eeae59dec6e2fcb`.
+The exact downloaded V20 baseline reproduced UIApplicationMain's early return.
+The corrected source-built CLI passed four lifecycle cases: continued dispatch
+after a stopped main activation, normal direct CFRunLoopStop return, nested
+activation return and continued dispatch, and genuine exit with status 73.
+
+Four native UIKit simulator state/event-boundary checks, six async ARMv7 alert
+cases, four graphical and four headless loading cases, four old alert-callback
+cases, four content-safety unit tests, four profile-preservation unit tests and
+16 formatter cases passed. The broad Rust suite retains exactly the two known
+duplicate-export failures for `_CATransform3DMakeScale` and
+`NSProcessInfo.operatingSystemVersionString`, with 74 passes and no new failures.
+The downloaded Linux CLI rechecked all four lifecycle cases locally and
+validated all 1,992 private offline assets without filesystem or save changes.
+
+The private final `Applesauce-OrderUp-v21.ipa` is 97,462,648 bytes with SHA256
+`ff3e9c1999a7a6586bf56e8d71cfabe2285e424bfdd390a9b839bf3913ceab8c`.
+All 19 patch-input digests, same host identity/version, compiled V21 core and
+retained V20 shared-SDL bridge markers were checked. The original offline pack
+remains byte-for-byte unchanged and its compiled ARM64 digest guard is present.
+The pack still targets the user's working original 1.0; no private game binary,
+Chef.wad or save is bundled. Install over the same existing app, retain the
+independent 1.0 backup and enable JIT. Actual 1.41 phone startup, native button
+taps and full gameplay remain pending the user's test.
 
 ## V20 build and phone regression
 
