@@ -340,3 +340,13 @@ whether Game Center now logs `invoking completion` and `completion returned`,
 whether nonempty draws/presentation start, and whether the close request
 reaches `Returning to the iOS host library`. Do not infer successful rendering
 from a successful build alone.
+
+## V20: asynchronous iPhone button prompts
+
+V19 was confirmed on the user's iPhone to finish extracting Order Up!! 1.41 and dismiss its first-run loading alert. The next log ends in the Facebook/Twitter promotion popup before any native OK-button callback; the user reports that the popup freezes and requires force-close.
+
+V20 replaces the iOS guest button-alert blocking SDL wait with copied, asynchronous UIKit state and a non-animated scene-aware alert window above the game controls. A guest main-run-loop timer consumes a real button selection once and dispatches the unchanged V18 callback path. No automatic OK click, currency change, first-run/save-flag edit, guest executable patch, or broader 1.41 asset assumption is introduced.
+
+The full V18/V19 patch chain, same host bundle identity and byte-identical private offline pack for the working original 1.0 fallback are retained. Public Actions artifacts contain emulator/test code only; private assets are added locally after verification.
+
+Validation for this revision includes four native UIKit simulator state/event-boundary checks and six original ARMv7 guest timer/ownership/callback cases, plus the preserved V18/V19 loading, callback, formatter, content and profile tests. Simulator event injection is not a hardware-touch test. iPhone OK-button behavior and full 1.41 gameplay remain unverified until the user tests the new build. Build/test results will be recorded after completion.
