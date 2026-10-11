@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read};
 
 const PACK_NAME: &str = "OrderUpDLC-1.41-v22.zip";
-const PACK_SHA256: &str = "61194eb1246cd975652ffb56079f17ae90acc191d2a6f3e17c8dd292e72b8144";
+const PACK_SHA256: &str = "a69882d58ae513c96f6b48b182e6ba90a4b9e4a9a16ed637736c60462bbfeef1";
 const EXECUTABLE_SHA256: &str = "6fd26085f17563cf31617cc0cff3a72d8c3ebb7db31a41127832fb35bbda9063";
 const MAX_PACK: usize = 15_000_000;
 const MAX_UNPACKED: u64 = 31_000_000;
