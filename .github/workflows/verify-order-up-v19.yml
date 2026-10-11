@@ -1,0 +1,146 @@
+name: Verify nonblocking loading alerts v19
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'patches/order-up-loading-v19.py'
+      - 'tests/loading-alert-guest.py'
+      - '.github/workflows/verify-order-up-v19.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: order-up-loading-v19-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      RUSTFLAGS: '-C link-arg=-latomic'
+      CARGO_BUILD_JOBS: '3'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      ALSOFT_DRIVERS: 'null'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build and virtual-display dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build clang libboost-dev libstdc++-14-dev libsndio-dev libx11-dev libxext-dev libsdl2-dev libopenal-dev libxml2-dev xvfb xauth libgles1 libgles2 libegl1 libgl1-mesa-dri
+
+      - name: Prepare exact V18 source and complete previous patch chain
+        run: |
+          set -euo pipefail
+          git clone --branch ios-host https://github.com/johnny901901901/Applesauce.git applesauce
+          git -C applesauce checkout --detach c75278bda86c80cbcec2d8d1493b5be9d5a9e0d1
+          git -C applesauce submodule update --init --recursive
+          git -C applesauce apply ../patches/ios-rendering-backport.patch
+          git -C applesauce apply ../patches/order-up-crystal-bypass.patch
+          python3 patches/order-up-viewport-v6.py
+          python3 patches/order-up-framebuffer-v7.py
+          python3 patches/order-up-crystal-resume-v8.py
+          python3 patches/order-up-render-probe-v9.py
+          python3 patches/order-up-scissor-present-v10.py
+          python3 patches/order-up-shader-inputs-v11.py
+          python3 patches/order-up-engine-geometry-v12.py
+          python3 patches/order-up-restaurant-init-v13.py
+          python3 patches/order-up-sjlj-hook-v14.py
+          git -C applesauce apply ../patches/order-up-cache-v15.patch
+          git -C applesauce apply ../patches/order-up-wide-strings-v16.patch
+          git -C applesauce apply ../patches/order-up-profile-ids-v17.patch
+          python3 patches/order-up-download-v18.py
+          git -C applesauce diff --check
+          mkdir -p validation
+
+      - name: Build V18 baseline CLI
+        working-directory: applesauce
+        run: cargo build --release --no-default-features 2>&1 | tee ../validation/build-v18.log
+
+      - name: Reproduce V18 blocking native loading dialog
+        run: |
+          set -euo pipefail
+          xvfb-run -a python3 tests/loading-alert-guest.py --app "$RUNNER_TEMP/LoadingBaseline.app" --emulator applesauce/target/release/touchHLE --graphical --baseline --log validation/loading-v18-baseline.log
+
+      - name: Apply and build V19
+        run: |
+          set -euo pipefail
+          python3 patches/order-up-loading-v19.py
+          git -C applesauce diff --check
+          cd applesauce
+          cargo build --release --no-default-features 2>&1 | tee ../validation/build-v19.log
+
+      - name: Verify native loading alert returns and guest timer completes
+        run: |
+          set -euo pipefail
+          xvfb-run -a python3 tests/loading-alert-guest.py --app "$RUNNER_TEMP/LoadingRegression.app" --emulator applesauce/target/release/touchHLE --graphical --log validation/loading-v19-graphical.log
+
+      - name: Verify loading alert ownership in headless mode
+        run: |
+          set -euo pipefail
+          python3 tests/loading-alert-guest.py --app "$RUNNER_TEMP/LoadingHeadless.app" --emulator applesauce/target/release/touchHLE --log validation/loading-v19-headless.log
+
+      - name: Preserve V18 real guest button and dismissal callbacks
+        run: |
+          set -euo pipefail
+          python3 tests/alert-dismissal-guest.py --app "$RUNNER_TEMP/AlertRegression.app" --emulator applesauce/target/release/touchHLE --log validation/alert-v19.log
+
+      - name: Verify private content and save-preservation checks
+        working-directory: applesauce
+        run: |
+          set -euo pipefail
+          cargo test order_up_download::tests -- --nocapture 2>&1 | tee ../validation/download-v19-tests.log
+          cargo test order_up::profile_identity_tests -- --nocapture 2>&1 | tee ../validation/profile-id-tests.log
+
+      - name: Verify wide and narrow formatter guest cases
+        run: |
+          set -euo pipefail
+          python3 tests/wide-string-guest.py --app "$RUNNER_TEMP/WideStringRegression.app" --emulator applesauce/target/release/touchHLE --log validation/guest-v19.log
+
+      - name: Run required broad Rust checks and report existing failures
+        run: |
+          set -uo pipefail
+          cd applesauce
+          set +e
+          cargo test -- --skip test_app 2>&1 | tee ../validation/rust-tests.log
+          test_status=${PIPESTATUS[0]}
+          set -e
+          cd ..
+          TEST_STATUS="$test_status" python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          log = Path('validation/rust-tests.log').read_text()
+          status = int(os.environ['TEST_STATUS'])
+          if status == 0:
+              print('Broad Rust checks passed.')
+          else:
+              expected = {'dyld::dylib_list::tests::no_duplicate_functions', 'dyld::dylib_list::tests::no_duplicate_classes'}
+              failed = set(re.findall(r'^test (\S+) \.\.\. FAILED$', log, re.MULTILINE))
+              assert 'error[E' not in log, 'Rust compilation failure'
+              assert failed == expected, 'Unexpected test failures: ' + repr(failed)
+              assert '_CATransform3DMakeScale' in log and 'operatingSystemVersionString' in log
+              print('Only the two known duplicate-export failures remain: ' + ', '.join(sorted(failed)))
+          PY
+
+      - name: Upload test-only validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-up-loading-v19-validation
+          path: validation/*.log
+          if-no-files-found: warn
+
+      - name: Upload source-built Linux emulator
+        uses: actions/upload-artifact@v4
+        with:
+          name: Applesauce-Linux-CLI-v19
+          path: applesauce/target/release/touchHLE
+          if-no-files-found: error

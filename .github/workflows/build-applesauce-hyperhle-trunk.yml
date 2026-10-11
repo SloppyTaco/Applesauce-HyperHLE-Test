@@ -1,4 +1,4 @@
-name: Build Applesauce rendering test
+name: Build Applesauce loading alert fix v19
 
 on:
   workflow_dispatch:
@@ -75,10 +75,11 @@ jobs:
           git -C applesauce apply --check ../patches/order-up-profile-ids-v17.patch
           git -C applesauce apply ../patches/order-up-profile-ids-v17.patch
           python3 patches/order-up-download-v18.py
+          python3 patches/order-up-loading-v19.py
           git -C applesauce diff --check
           git -C applesauce diff --stat
 
-      - name: Make side-by-side test app
+      - name: Keep existing test-app identity and set V19 version
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -93,8 +94,8 @@ jobs:
           verifier.write_text(verifier.read_text().replace('io.github.johnny901901901.applesauce', os.environ['TEST_BUNDLE_ID']))
           PY
           /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Applesauce HLE Test' applesauce/platform/ios/Config/Info.plist
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 18.0.0' applesauce/platform/ios/Config/Info.plist
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 18' applesauce/platform/ios/Config/Info.plist
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 19.0.0' applesauce/platform/ios/Config/Info.plist
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 19' applesauce/platform/ios/Config/Info.plist
 
       - name: Build shared SDL for iPhone
         run: |
@@ -125,6 +126,7 @@ jobs:
             echo "Graphics: targeted HyperHLE-derived backport; not the full trunk core"
             echo "Order Up: v4 NIB viewDidLoad fix + v5 Crystal UI bypass + v6 viewport correction/trace + v8 synthetic Crystal dismissal/resume + v9 source/draw diagnostics + v10 empty-scissor repair, direct ES2 presentation and display readback + v11 invalid screen_dims repair and shader-input diagnostics + v12 executable-guarded engine geometry repair (phone menu confirmed) + v13 guarded replay of original restaurant initialization for an empty/unselected manager before level setup, with module/nil/shader traces + v14 SjLj observation wrappers retain original guest libgcc behavior and activate the recovery trigger + v15 validate the existing Chef.wad cache and restore only from the exact original archive, preserving the old cache and game saves; green control square removed; v16 correct 32-bit wide-string formatting and observe original purchase/ownership state without altering it; v17 recover an entirely blank restaurant ID table using only identities recorded from the original initializer, preserving every other profile byte; v18 separate native button clicks from guarded programmatic alert dismissal to prevent the confirmed recursive callback freeze, and verify/install a private Diner/Common content pack without altering original Chef.wad, purchases or saves"
             echo "Build configuration: $GITHUB_SHA"
+            echo "V19: buttonless loading alerts return immediately and retain their presentation until original game dismissal; existing V18 button prompts and the complete previous patch chain are retained. This first 1.41 startup fix does not port 1.0-specific recovery or claim full 1.41 gameplay compatibility."
             echo "Bundle ID: $TEST_BUNDLE_ID"
             shasum -a 256 ../patches/ios-rendering-backport.patch
             shasum -a 256 ../patches/order-up-crystal-bypass.patch
@@ -141,9 +143,10 @@ jobs:
             shasum -a 256 ../patches/order-up-wide-strings-v16.patch
             shasum -a 256 ../patches/order-up-profile-ids-v17.patch
             shasum -a 256 ../patches/order-up-download-v18.py
+            shasum -a 256 ../patches/order-up-loading-v19.py
           } > dist/BUILD_INFO.txt
 
-      - name: Check emulator-only package and compiled V18 code
+      - name: Check emulator-only package and compiled V19 code
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -158,20 +161,22 @@ jobs:
               info = plistlib.loads(ipa.read('Payload/Applesauce.app/Info.plist'))
               assert info['CFBundleIdentifier'] == 'io.github.sloppytaco.applesaucehyperhletest'
               assert info['CFBundleDisplayName'] == 'Applesauce HLE Test'
+              assert info['CFBundleShortVersionString'] == '19.0.0'
+              assert str(info['CFBundleVersion']) == '19'
               core = ipa.read('Payload/Applesauce.app/Frameworks/libhyperhle_core.dylib')
               assert struct.unpack_from('<II', core) == (0xFEEDFACF, 0x0100000C)
               for marker in (b'[ORDER UP FORMAT v16]', b'[ORDER UP PURCHASE v16]',
                              b'[ORDER UP OWNERSHIP v16]', b'[ORDER UP CACHE v15]',
                              b'[ORDER UP PROFILE v17]', b'[ORDER UP DOWNLOAD v18]',
-                             b'[ALERT CALLBACK v18]'):
+                             b'[ALERT CALLBACK v18]', b'[ALERT LOADING v19]'):
                   assert marker in core, marker
-          print('Verified ARM64 V18 emulator package without private game assets.')
+          print('Verified ARM64 V19 emulator package without private game assets.')
           PY
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Applesauce-HLE-Rendering-Test-v18
+          name: Applesauce-HLE-Rendering-Test-v19
           path: |
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa.sha256

@@ -1,3 +1,40 @@
+# Order Up!! V19: first-loading alert fix for 1.41
+
+The user's V18 phone log confirms that Order Up!! 1.41 launches with JIT and
+extracts its main package, then stops while presenting the buttonless
+"Loading for the first time. Please wait..." alert. The guest's progress
+alert has no user action; its original completion selector dismisses it.
+The emulator previously invented an OK button and blocked the guest scheduler
+inside SDL's native dialog, preventing loading from completing normally.
+
+V19 lets a nonempty alert with zero buttons return immediately. The logical
+alert remains visible and retained until the original game dismisses it.
+Repeated show is ignored, and guarded programmatic dismissal releases that
+presentation ownership after delegate callbacks. The existing empty-placeholder
+behavior and V18 native button/click/dismissal path are retained. Buttonless
+alerts do not display a native modal or custom progress bar in this targeted
+fix; this is not a full asynchronous implementation of button-bearing alerts.
+
+An independent ARMv7 fixture checks genuine NSTimer completion, nested
+programmatic dismissal, repeated presentation, caller release during loading,
+and message-only loading alerts. The graphical V18 baseline and V19 tests run
+under a virtual display, separately from the existing V18 callback, private
+content, save-preservation and formatter regressions.
+
+This is the first 1.41 startup fix, not a claim that the full newer game works.
+The previous 1.0-specific executable guards and recovery stay unchanged.
+No original game executable, save or private asset is published in this repo.
+The private final IPA retains the existing V18 content pack for returning to
+the user's working 1.0 game. It keeps bundle ID
+`io.github.sloppytaco.applesaucehyperhletest` and uses version 19.0.0 (19),
+so it installs over the same test app with the same signing account.
+
+The user confirmed V18's download fix and subsequent 1.0 gameplay work on
+their phone. Keep their independent 1.0 backup untouched while testing 1.41.
+V19 validation and packaging results will be recorded after the builds finish.
+
+## Previous V18 work
+
 # Order Up!! V18: alert dismissal and private offline Gravy Chug content
 
 The user confirmed that V17 purchases Gravy Chug correctly. Entering it opens
