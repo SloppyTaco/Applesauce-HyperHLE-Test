@@ -31,7 +31,43 @@ so it installs over the same test app with the same signing account.
 
 The user confirmed V18's download fix and subsequent 1.0 gameplay work on
 their phone. Keep their independent 1.0 backup untouched while testing 1.41.
-V19 validation and packaging results will be recorded after the builds finish.
+## Verified V19 build and private package
+
+The [iPhone build 38142173228](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38142173228)
+passed for source commit `d1b1c099f6136ccb77fc7bb248478f015da547f8`.
+The ARM64 host and core, app identity, version 19.0.0 (19), all 16 patch
+digests and compiled V15–V19 markers were checked in the downloaded IPA.
+
+The [regression run 38142887341](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38142887341)
+passed with the same emulator patch chain. Its later commit
+`1010886d845554d30ccc7a0700d13683ecd38d89` changes only the fixture and
+verification workflow. The baseline reuses the byte-verified V18 Linux
+artifact from run 38085250794. On the Linux virtual display, SDL returned
+without opening a dialog, reproducing V18's incorrect synthetic click and
+premature dismissal. The fixture also recognizes the blocking path observed
+on the phone. V19 bypasses that native path for buttonless loading alerts.
+
+- Four real ARMv7 loading cases passed with a graphical window and again
+  headlessly, including real timer completion and caller-release lifetime.
+- Four existing alert callback cases, four offline content checks, four
+  profile/save-preservation checks and 16 formatter guest cases passed.
+- The broad Rust suite has 74 passing tests and the same two existing
+  duplicate-export failures for `_CATransform3DMakeScale` and
+  `NSProcessInfo.operatingSystemVersionString`; no new failures were accepted.
+
+The private final `Applesauce-OrderUp-v19.ipa` is 97,450,427 bytes with SHA256
+`f648c64e9cdcf6f8c9846dcf4c9b58b1e251b39e9d0a7ec5bb7c965a19016851`.
+The unchanged V18 offline pack contains 1,992 verified assets and has SHA256
+`c8a5c51ecc17200272897b9104b05f7a48f95e712617c9bc212dbe0ee6596a41`.
+The new source-built Linux CLI validated it without changing files or saves.
+The packaged ARM64 core retains the exact compiled pack-digest comparison.
+Those resources still target the original 1.0 game; no 1.41 content port or
+game executable is included in this first loading fix.
+
+The first-loading behavior is verified with independent guest programs.
+Full Order Up!! 1.41 startup and gameplay remain pending the user's phone
+test. Install over the existing app using the same AltStore account, enable
+JIT, and launch the already imported 1.41 game. Keep the separate 1.0 backup.
 
 ## Previous V18 work
 
