@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Original ARMv7 loading-alert guest; no SDK or game assets required.
 
-The graphical V18 baseline must stop inside the native message box. V19 must
-return from show, run a real NSTimer and deliver one programmatic dismissal.
+The graphical V18 baseline either blocks in the native message box or, when
+SDL cannot open it, invents a click and incorrectly dismisses the alert.
+V19 must return from show, run a real NSTimer and deliver one programmatic dismissal.
 The same guest also checks repeated show and asynchronous object ownership.
 """
 import argparse
@@ -275,7 +276,16 @@ def main():
         return
     if args.log:
         args.log.write_text(output)
-    assert not args.baseline, output[-5000:]
+    if args.baseline:
+        assert args.graphical, 'A native baseline needs a graphical run.'
+        assert run.returncode == 2, output[-5000:]
+        assert '[LOADING REGRESSION] BEFORE_SHOW' in output, output[-5000:]
+        assert 'UIAlertView show (SDL2 dialog)' in output, output[-5000:]
+        assert '[ALERT CALLBACK v18] Native button 0 returned; dispatching one user click' in output, output[-5000:]
+        assert '[LOADING REGRESSION] FAIL loading alert returns and timer dismisses it' in output, output[-5000:]
+        assert 'panicked at' not in output, output[-5000:]
+        print('V18 native-dialog fallback incorrectly synthesized a click and hid the loading alert.')
+        return
     for line in output.splitlines():
         if '[LOADING REGRESSION]' in line or '[ALERT LOADING v19]' in line:
             print(line)
@@ -283,6 +293,7 @@ def main():
     assert '[LOADING REGRESSION] ALL PASS 4' in output, output[-5000:]
     assert '[ALERT LOADING v19] Buttonless loading alert is nonblocking' in output
     assert '[LOADING REGRESSION] FAIL' not in output
+    assert '[ALERT CALLBACK v18] Native button' not in output
     print('All four real guest loading-alert cases passed.')
 
 

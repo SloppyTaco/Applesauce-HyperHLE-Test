@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: order-up-loading-v19-${{ github.ref }}
@@ -61,14 +62,33 @@ jobs:
           git -C applesauce diff --check
           mkdir -p validation
 
-      - name: Build V18 baseline CLI
-        working-directory: applesauce
-        run: cargo build --release --no-default-features 2>&1 | tee ../validation/build-v18.log
+      - name: Download the verified unchanged V18 baseline CLI
+        uses: actions/download-artifact@v4
+        with:
+          name: Applesauce-Linux-CLI-v18
+          path: baseline-v18
+          run-id: 38085250794
+          github-token: ${{ github.token }}
 
-      - name: Reproduce V18 blocking native loading dialog
+      - name: Verify the exact V18 baseline bytes
         run: |
           set -euo pipefail
-          xvfb-run -a python3 tests/loading-alert-guest.py --app "$RUNNER_TEMP/LoadingBaseline.app" --emulator applesauce/target/release/touchHLE --graphical --baseline --log validation/loading-v18-baseline.log
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          binary = Path('baseline-v18/touchHLE')
+          data = binary.read_bytes()
+          assert hashlib.sha256(data).hexdigest() == '0895c3ecc49c84c2b75a10b9d1c0d2ca6ed4e6a8c6880d6a1b81fdeac5a0024e'
+          assert b'[ALERT CALLBACK v18]' in data and b'[ORDER UP DOWNLOAD v18]' in data
+          assert b'[ALERT LOADING v19]' not in data
+          binary.chmod(0o755)
+          print('Exact previously validated V18 baseline verified; source commit e7d2d0f5891abd89be3aa875363244f0ae403973.')
+          PY
+
+      - name: Reproduce V18 native loading-alert failure
+        run: |
+          set -euo pipefail
+          xvfb-run -a python3 tests/loading-alert-guest.py --app "$RUNNER_TEMP/LoadingBaseline.app" --emulator baseline-v18/touchHLE --graphical --baseline --log validation/loading-v18-baseline.log
 
       - name: Apply and build V19
         run: |
