@@ -19,7 +19,10 @@ def main():
     args = parser.parse_args()
     devices = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '-j',
                              stdout=subprocess.PIPE).stdout)['devices']
-    options = [device for runtime, group in devices.items() if 'iOS' in runtime
+    sdk_version = run('xcrun', '--sdk', 'iphonesimulator', '--show-sdk-version',
+                      stdout=subprocess.PIPE).stdout.strip()
+    runtime_marker = 'iOS-' + '-'.join(sdk_version.split('.')[:2])
+    options = [device for runtime, group in devices.items() if runtime_marker in runtime
                for device in group if device['isAvailable'] and 'iPhone' in device['name']]
     assert options, 'No available iOS simulator'
     device = options[0]
@@ -52,12 +55,13 @@ def main():
             str(Path(__file__).with_name('native-alert-v20.m')), '-o', str(app / 'AlertV20'))
         run('codesign', '--force', '--sign', '-', str(app))
         run('xcrun', 'simctl', 'install', udid, str(app))
-        launched = subprocess.run(['xcrun', 'simctl', 'launch', udid,
-            info['CFBundleIdentifier']], text=True, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, timeout=90)
         container = run('xcrun', 'simctl', 'get_app_container', udid,
             info['CFBundleIdentifier'], 'data', stdout=subprocess.PIPE).stdout.strip()
         result_file = Path(container) / 'Documents/native-alert-regression.log'
+        result_file.unlink(missing_ok=True)  # Only this isolated fixture's prior result.
+        launched = subprocess.run(['xcrun', 'simctl', 'launch', udid,
+            info['CFBundleIdentifier']], text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, timeout=90)
         deadline = time.monotonic() + 45
         output = ''
         while time.monotonic() < deadline:

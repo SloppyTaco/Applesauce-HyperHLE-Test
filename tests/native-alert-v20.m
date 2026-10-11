@@ -28,15 +28,11 @@ static void uncaughtException(NSException *exception)
     record("[NATIVE ALERT REGRESSION] FAIL " label "\n"); \
     fflush(stderr); _exit(81); } } while (0)
 
-static void spin(double seconds)
-{
-    CFAbsoluteTime limit = CFAbsoluteTimeGetCurrent() + seconds;
-    while (CFAbsoluteTimeGetCurrent() < limit)
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, false);
-}
-
 @interface TouchHLETestSceneDelegate : UIResponder <UIWindowSceneDelegate>
 @property(nonatomic, strong) UIWindow *window;
+@property(nonatomic, strong) NSTimer *heartbeatTimer;
+@property(nonatomic) unsigned heartbeats;
+@property(nonatomic) uint64_t firstTestToken;
 @end
 @implementation TouchHLETestSceneDelegate
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session
@@ -52,20 +48,28 @@ static void spin(double seconds)
 {
     NSSetUncaughtExceptionHandler(uncaughtException);
     record("[NATIVE ALERT REGRESSION] START actual UIKit simulator\n");
-    __block unsigned heartbeats = 0;
-    NSTimer *timer = [NSTimer scheduledTimerWithTimeInterval:0.01 repeats:YES
-        block:^(NSTimer *unused) { (void)unused; heartbeats++; }];
+    __weak TouchHLETestSceneDelegate *weakSelf = self;
+    self.heartbeats = 0;
+    self.heartbeatTimer = [NSTimer scheduledTimerWithTimeInterval:0.01 repeats:YES
+        block:^(NSTimer *unused) { (void)unused; weakSelf.heartbeats++; }];
     char title[] = "Startup popup";
     char first[] = "OK";
     char second[] = "Later";
     const char *buttons[] = {first, second};
     uint64_t token = TouchHLE_BeginAsyncAlertV20(self.window, title, "Message", buttons, 2);
     REQUIRE(token != 0, "create token");
+    self.firstTestToken = token;
     memset(title, 'x', sizeof(title) - 1);
     memset(first, 'x', sizeof(first) - 1);
-    spin(0.12);
+    // Return to UIKit's ordinary loop, exactly as the new async show does.
+    // Do not impose a short nested-loop timing budget on a cold simulator.
+    [self performSelector:@selector(checkFirstPresentation) withObject:nil afterDelay:1.0];
+}
+- (void)checkFirstPresentation
+{
+    uint64_t token = self.firstTestToken;
     TouchHLEAlertStateV20 *state = touchHLEAlertsV20[@(token)];
-    REQUIRE(heartbeats >= 2, "native run loop continues");
+    REQUIRE(self.heartbeats >= 2, "native run loop continues");
     REQUIRE([state.title isEqualToString:@"Startup popup"] &&
             [state.buttonTitles[0] isEqualToString:@"OK"], "copied strings outlive caller");
     REQUIRE(state.window.windowScene == self.window.windowScene &&
@@ -78,13 +82,16 @@ static void spin(double seconds)
     TouchHLE_RecordAlertSelectionV20(state, 0);
     REQUIRE(TouchHLE_PollAsyncAlertV20(token) == 1, "one original selected index");
     REQUIRE(TouchHLE_PollAsyncAlertV20(token) == -2, "selection consumed once");
-    spin(0.02);
+    [self performSelector:@selector(checkOtherCases) withObject:nil afterDelay:0.1];
+}
+- (void)checkOtherCases
+{
     REQUIRE(self.window.isKeyWindow, "restore original key window");
     record("[NATIVE ALERT REGRESSION] PASS 01 nonblocking presentation and copied ownership\n");
 
     const char *ok[] = {"OK"};
-    token = TouchHLE_BeginAsyncAlertV20(self.window, "Dismissed by game", "", ok, 1);
-    state = touchHLEAlertsV20[@(token)];
+    uint64_t token = TouchHLE_BeginAsyncAlertV20(self.window, "Dismissed by game", "", ok, 1);
+    TouchHLEAlertStateV20 *state = touchHLEAlertsV20[@(token)];
     TouchHLE_DismissAsyncAlertV20(token);
     TouchHLE_DismissAsyncAlertV20(token);
     TouchHLE_RecordAlertSelectionV20(state, 0);
@@ -117,7 +124,8 @@ static void spin(double seconds)
     TouchHLE_DismissAsyncAlertV20(token);
     REQUIRE(TouchHLE_BeginAsyncAlertV20(self.window, "Invalid", "", ok, 0) == 0,
             "invalid request rejected");
-    [timer invalidate];
+    [self.heartbeatTimer invalidate];
+    self.heartbeatTimer = nil;
     record("[NATIVE ALERT REGRESSION] PASS 04 exit cleanup and token isolation\n");
     record("[NATIVE ALERT REGRESSION] ALL PASS 4\n");
     fflush(stderr);
