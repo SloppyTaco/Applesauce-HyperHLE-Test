@@ -1,4 +1,4 @@
-name: Build Applesauce async button alert fix v20
+name: Build Applesauce application loop lifetime fix v21
 
 on:
   workflow_dispatch:
@@ -9,6 +9,7 @@ on:
       - 'patches/**'
       - 'tests/native-alert-v20.m'
       - 'tests/run-native-alert-v20.py'
+      - 'tests/run-native-alert-v21.py'
 
 permissions:
   contents: read
@@ -45,7 +46,7 @@ jobs:
       - name: Verify actual UIKit asynchronous alert state on simulator
         run: |
           set -euo pipefail
-          python3 tests/run-native-alert-v20.py --log native-alert-v20.log
+          python3 tests/run-native-alert-v21.py --log native-alert-v20.log
 
       - name: Install build dependencies
         run: |
@@ -85,10 +86,11 @@ jobs:
           python3 patches/order-up-download-v18.py
           python3 patches/order-up-loading-v19.py
           python3 patches/order-up-alerts-v20.py
+          python3 patches/order-up-application-loop-v21.py
           git -C applesauce diff --check
           git -C applesauce diff --stat
 
-      - name: Keep existing test-app identity and set V20 version
+      - name: Keep existing test-app identity and set V21 version
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -103,8 +105,8 @@ jobs:
           verifier.write_text(verifier.read_text().replace('io.github.johnny901901901.applesauce', os.environ['TEST_BUNDLE_ID']))
           PY
           /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Applesauce HLE Test' applesauce/platform/ios/Config/Info.plist
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 20.0.0' applesauce/platform/ios/Config/Info.plist
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 20' applesauce/platform/ios/Config/Info.plist
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 21.0.0' applesauce/platform/ios/Config/Info.plist
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 21' applesauce/platform/ios/Config/Info.plist
 
       - name: Build shared SDL for iPhone
         run: |
@@ -139,6 +141,7 @@ jobs:
             echo "V19: buttonless loading alerts return immediately and retain their presentation until original game dismissal; existing V18 button prompts and the complete previous patch chain are retained. This first 1.41 startup fix does not port 1.0-specific recovery or claim full 1.41 gameplay compatibility."
             echo "V20: button alerts return immediately on iOS; copied UIKit state records one real user selection for delivery on the guest main run loop. Dedicated non-animated alert window sits above game controls. Programmatic dismissal, duplicate events and core exit cancel native state/timers without synthetic clicks. Existing loading, callbacks, private-pack guards and original 1.0 fallback are preserved."
             echo "Native UIKit simulator state/event-boundary cases: 4 passed; actual phone tap and full 1.41 gameplay still need user verification."
+            echo "V21: UIApplicationMain restarts stopped main-run-loop activations instead of returning the last timer pointer to guest main and closing the app. CFRunLoopRun/Stop callers, genuine guest exit/abort, all previous alerts and 1.0-specific guards remain unchanged. Nonzero exits record a caller stack for diagnosis. The user's V20 phone log shows this early-exit regression; full 1.41 gameplay remains unverified."
             echo "Bundle ID: $TEST_BUNDLE_ID"
             shasum -a 256 ../patches/ios-rendering-backport.patch
             shasum -a 256 ../patches/order-up-crystal-bypass.patch
@@ -158,9 +161,10 @@ jobs:
             shasum -a 256 ../patches/order-up-loading-v19.py
             shasum -a 256 ../patches/order-up-alerts-v20.py
             shasum -a 256 ../patches/async-alert-uikit-v20.inc
+            shasum -a 256 ../patches/order-up-application-loop-v21.py
           } > dist/BUILD_INFO.txt
 
-      - name: Check emulator-only package and compiled V20 code
+      - name: Check emulator-only package and compiled V21 code
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -175,14 +179,15 @@ jobs:
               info = plistlib.loads(ipa.read('Payload/Applesauce.app/Info.plist'))
               assert info['CFBundleIdentifier'] == 'io.github.sloppytaco.applesaucehyperhletest'
               assert info['CFBundleDisplayName'] == 'Applesauce HLE Test'
-              assert info['CFBundleShortVersionString'] == '20.0.0'
-              assert str(info['CFBundleVersion']) == '20'
+              assert info['CFBundleShortVersionString'] == '21.0.0'
+              assert str(info['CFBundleVersion']) == '21'
               core = ipa.read('Payload/Applesauce.app/Frameworks/libhyperhle_core.dylib')
               assert struct.unpack_from('<II', core) == (0xFEEDFACF, 0x0100000C)
               for marker in (b'[ORDER UP FORMAT v16]', b'[ORDER UP PURCHASE v16]',
                              b'[ORDER UP OWNERSHIP v16]', b'[ORDER UP CACHE v15]',
                              b'[ORDER UP PROFILE v17]', b'[ORDER UP DOWNLOAD v18]',
-                             b'[ALERT CALLBACK v18]', b'[ALERT LOADING v19]', b'[ALERT ASYNC v20]'):
+                             b'[ALERT CALLBACK v18]', b'[ALERT LOADING v19]', b'[ALERT ASYNC v20]',
+                             b'[APPLICATION LOOP v21]', b'[GUEST EXIT v21]'):
                   assert marker in core, marker
               native = [name for name in names if name.startswith('Payload/Applesauce.app/Frameworks/') and 'SDL' in name and name.endswith('.dylib')]
               assert len(native) == 1, native
@@ -191,13 +196,13 @@ jobs:
                              b'_SDL_TOUCHHLE_AlertDismissV20', b'_SDL_TOUCHHLE_AlertResetV20'):
                   assert symbol in sdl, symbol
               assert b'[ALERT NATIVE v20]' in sdl
-          print('Verified ARM64 V20 core and shared SDL async bridge without private game assets.')
+          print('Verified ARM64 V21 application lifetime fix and retained shared SDL async bridge without private game assets.')
           PY
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Applesauce-HLE-Rendering-Test-v20
+          name: Applesauce-HLE-Rendering-Test-v21
           path: |
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa.sha256

@@ -1,3 +1,39 @@
+# Order Up!! V21: application-loop lifetime correction
+
+The user's V20 phone log shows the startup promotion popup returns, the guest
+timer finishes, and the app exits with status `806421216` (`0x301102e0`), the
+same pointer as that timer. JIT and both graphics contexts initialized normally.
+The game's private startup routine preserves UIApplicationMain's return value
+and passes it to exit. UIKit's UIApplicationMain must never return, but the
+emulator previously called `-[NSRunLoop run]` only once. CFRunLoopStop could
+therefore end the entire application instead of only that loop activation.
+
+An original ARMv7 UIApplicationMain/NSTimer/popup fixture reproduces the early
+return on the exact V20 executable. V21 restarts stopped application-loop
+activations without changing ordinary CFRunLoopRun/Stop behavior. Separate
+fixtures check direct stop returns, nested activation returns and later timers
+continue, and genuine guest exit still terminates with its requested status.
+Nonzero guest exits now include a caller stack to distinguish remaining errors.
+
+All previous patches, native button event delivery, programmatic dismissal,
+buttonless loading, original 1.0 executable guards and offline-pack checks stay
+unchanged. No save, coin, purchase, first-run flag or private game byte is edited
+by this correction. Version 21.0.0 (21) keeps the same existing test-app identity.
+V21 build and new regression verification are pending; this is not a claim of
+full 1.41 startup/gameplay compatibility or a phone-tested fix.
+
+## V20 build and phone regression
+
+The iPhone [run 38149645335](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38149645335)
+and Linux [run 38149645355](https://github.com/SloppyTaco/Applesauce-HyperHLE-Test/actions/runs/38149645355)
+passed from `b7860b3be2decb4b48fedc3f620eaa0b67f26ef9`. Four native UIKit
+state/event-boundary tests and six original ARMv7 async-alert cases passed.
+Those fixtures did not exercise UIApplicationMain's lifetime; the user's
+subsequent actual game launch exited early as described above. The new V21
+fixture closes that test gap. Hardware tap/full game behavior is still unverified.
+
+## Previous V19 work
+
 # Order Up!! V19: first-loading alert fix for 1.41
 
 The user's V18 phone log confirms that Order Up!! 1.41 launches with JIT and
