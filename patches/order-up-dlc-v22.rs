@@ -258,7 +258,7 @@ pub(crate) fn interpose(env: &mut Environment, selector: SEL, class: Class) -> b
     // Support the known dictionary revision 1 only, as in the original DLC
     // checks. Different requests retain the game's original version check.
     if selector == "checkCompletePackageDownloaded:version:" && env.cpu.regs()[3] != 1 {
-        log_once!("[ORDER UP DLC v22] Unrecognized requested package revision {}; original check retained", env.cpu.regs()[3]);
+        log_once!("[ORDER UP DLC v22] Unrecognized requested package revision; original check retained");
         return false;
     }
     let name: id = crate::mem::MutPtr::from_bits(env.cpu.regs()[2]);
