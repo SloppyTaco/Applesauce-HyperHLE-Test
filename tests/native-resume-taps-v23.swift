@@ -1,5 +1,6 @@
 import XCTest
 
+@MainActor
 final class ResumeTapTests: XCTestCase {
     func testNativeInterruptionsAndQueueAvailability() {
         continueAfterFailure = false
@@ -8,6 +9,10 @@ final class ResumeTapTests: XCTestCase {
         app.launchEnvironment["RESUME_BASELINE"] = baseline ? "1" : "0"
         XCUIDevice.shared.orientation = .landscapeLeft
         app.launch()
+        XCTAssertTrue(app.staticTexts["Ready to start"].waitForExistence(timeout: 15))
+        let start = app.buttons["resume-start"]
+        XCTAssertTrue(start.isHittable)
+        start.tap()
         if baseline {
             XCTAssertTrue(app.staticTexts["Baseline queue blocked"].waitForExistence(timeout: 15))
             XCTAssertFalse(app.staticTexts["Baseline not reproduced"].exists)

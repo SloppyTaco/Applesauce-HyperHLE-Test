@@ -54,10 +54,12 @@ final class ResumeHarness: NSObject {
     private let status = UILabel()
     private let foreground = UILabel()
     private let heartbeat = UILabel()
+    private let startButton = UIButton(type: .system)
     private let gameButton = UIButton(type: .system)
     private let exitButton = UIButton(type: .system)
     private var heartbeatTimer: Timer?
     private var running = false
+    private var starting = false
     private var entries = 0
     private var probes = 0
     private var beats = 0
@@ -90,7 +92,11 @@ final class ResumeHarness: NSObject {
         gameButton.accessibilityIdentifier = "resume-game-touch"
         gameButton.backgroundColor = .white
         gameButton.addTarget(self, action: #selector(gameTouch(_:)), for: .touchUpInside)
-        let stack = UIStackView(arrangedSubviews: [status, foreground, heartbeat, gameButton])
+        startButton.setTitle("Start core", for: .normal)
+        startButton.accessibilityIdentifier = "resume-start"
+        startButton.backgroundColor = .white
+        startButton.addTarget(self, action: #selector(startCore(_:)), for: .touchUpInside)
+        let stack = UIStackView(arrangedSubviews: [status, foreground, heartbeat, startButton, gameButton])
         stack.axis = .vertical
         stack.spacing = 15
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -99,6 +105,7 @@ final class ResumeHarness: NSObject {
             stack.centerXAnchor.constraint(equalTo: root.view.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: root.view.centerYAnchor),
             stack.widthAnchor.constraint(equalToConstant: 320),
+            startButton.heightAnchor.constraint(equalToConstant: 44),
             gameButton.heightAnchor.constraint(equalToConstant: 64)
         ])
         let overlay = ResumeRootController()
@@ -140,9 +147,18 @@ final class ResumeHarness: NSObject {
     func start() {
         heartbeatTimer = Timer.scheduledTimer(timeInterval: 0.05, target: self,
             selector: #selector(tick(_:)), userInfo: nil, repeats: true)
+        status.text = "Ready to start"
+        log("READY native scene connected")
+    }
+
+    @objc private func startCore(_ button: UIButton) {
+        guard entries == 0, !starting else { return }
+        starting = true
+        button.isEnabled = false
         // Use the old final launch context for the baseline. The fixed entry
         // uses the exact production helper, without replacing SDL's pump.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        // Start only after XCTest has observed the real app's completed launch.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             if self.baseline {
                 self.runCore()
             } else {

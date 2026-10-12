@@ -133,6 +133,9 @@ def main():
         selected = next(d for runtime, group in devices().items() if marker in runtime
                         for d in group if d['isAvailable'] and 'iPhone' in d['name'])
         udid = selected['udid']
+        if udid not in previous:
+            run('xcrun', 'simctl', 'boot', udid)
+        run('xcrun', 'simctl', 'bootstatus', udid, '-b')
         for baseline in (True, False):
             label = 'baseline-dispatch-v22' if baseline else 'fixed-runloop-v23'
             with tempfile.TemporaryDirectory(prefix='v23-resume-') as folder:
@@ -154,6 +157,13 @@ def main():
                 args.log.with_name('native-resume-' + label + '.log').write_text(content)
                 outputs.append(content)
                 print(content)
+                if process.returncode != 0:
+                    diagnostic = args.log.with_name('native-resume-' + label + '-system.log')
+                    with diagnostic.open('w') as output:
+                        subprocess.run(['xcrun', 'simctl', 'spawn', udid, 'log', 'show',
+                            '--style', 'compact', '--last', '3m', '--predicate',
+                            'process == "ResumeV23" OR (process == "SpringBoard" AND eventMessage CONTAINS "resumev23")'],
+                            text=True, stdout=output, stderr=subprocess.STDOUT, timeout=30)
                 assert process.returncode == 0, log.read_text()[-20000:]
                 if baseline:
                     assert 'BASELINE queue blocked while heartbeat advances' in content
