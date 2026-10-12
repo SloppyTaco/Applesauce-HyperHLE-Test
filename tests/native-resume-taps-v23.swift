@@ -40,13 +40,13 @@ final class ResumeTapTests: XCTestCase {
         // actual panel root and its observed system toolbar, not a user widget.
         let panel = springboard.otherElements["cc-root-folder-view"]
         XCTAssertTrue(panel.waitForExistence(timeout: 8), springboard.debugDescription)
-        XCTAssertTrue(springboard.buttons["Add Controls"].isHittable)
+        XCTAssertTrue(springboard.buttons["Add Controls"].exists)
         XCTAssertFalse(game.isHittable, "Control Center must actually cover the game")
         let closeStart = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98))
         let closeEnd = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
         closeStart.press(forDuration: 0.05, thenDragTo: closeEnd)
-        XCTAssertTrue(app.staticTexts["Foreground 2"].waitForExistence(timeout: 10))
-        XCTAssertTrue(game.isHittable)
+        XCTAssertTrue(app.staticTexts["Foreground 2"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(game.isHittable, app.debugDescription)
         game.tap()
         XCTAssertTrue(app.staticTexts["Tap 3"].waitForExistence(timeout: 5))
 

@@ -29,6 +29,41 @@ env:
   TEST_BUNDLE_ID: io.github.sloppytaco.applesaucehyperhletest
 
 jobs:
+  native-checks:
+    name: Native interruption and alert checks
+    runs-on: macos-15
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout build repo
+        uses: actions/checkout@v4
+      - name: Show native toolchain
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+      - name: Verify native timer entry, queued completions, and interruption taps
+        run: |
+          set -euo pipefail
+          python3 tests/run-native-resume-v23.py --log native-resume-v23.log
+      - name: Verify retained native alert state and real XCUI taps
+        run: |
+          set -euo pipefail
+          python3 tests/run-native-alert-v22.py --log native-alert-v22.log
+      - name: Upload native input validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-input-validation-v23
+          path: |
+            native-alert-v22.log
+            native-state-v22.log
+            native-taps-*.log
+            native-resume*.log
+          if-no-files-found: warn
+
   build:
     runs-on: macos-15
     timeout-minutes: 90
@@ -47,16 +82,6 @@ jobs:
           xcodebuild -version
           rustc --version
           cargo --version
-
-      - name: Verify native timer entry, queued completions, and interruption taps
-        run: |
-          set -euo pipefail
-          python3 tests/run-native-resume-v23.py --log native-resume-v23.log
-
-      - name: Verify native state and actual XCUI taps during occupied main dispatch
-        run: |
-          set -euo pipefail
-          python3 tests/run-native-alert-v22.py --log native-alert-v22.log
 
       - name: Install build dependencies
         run: |
@@ -161,12 +186,12 @@ jobs:
             echo "Builder: macos-15 (ARM64) with Xcode 26.3 and iOS 26.2 SDK, explicitly selected from the official supported runner image."
             echo "V19: buttonless loading alerts return immediately and retain their presentation until original game dismissal; existing V18 button prompts and the complete previous patch chain are retained. This first 1.41 startup fix does not port 1.0-specific recovery or claim full 1.41 gameplay compatibility."
             echo "V20: button alerts return immediately on iOS; copied UIKit state records one real user selection for delivery on the guest main run loop. Dedicated non-animated alert window sits above game controls. Programmatic dismissal, duplicate events and core exit cancel native state/timers without synthetic clicks. Existing loading, callbacks, private-pack guards and original 1.0 fallback are preserved."
-            echo "Native UIKit: 4 state/event cases and 4 actual XCUI taps pass with a main GCD block occupied using SDL run-loop turns; the previous deferred handler stall is reproduced. Actual iPhone gameplay with cross-version DLC still needs user verification."
+            echo "Native UIKit: the independent native-checks job must pass four state/event cases and four actual XCUI taps during occupied main dispatch, with the previous deferred-handler stall reproduced. This compiled artifact alone does not attest those results."
             echo "Retained V21: UIApplicationMain restarts stopped main-run-loop activations instead of returning the last timer pointer to guest main and closing the app. CFRunLoopRun/Stop callers, genuine guest exit/abort, all previous alerts and 1.0-specific guards remain unchanged. Nonzero exits record a caller stack for diagnosis. The user confirmed V21 fully loads 1.41; their next log shows a native popup visually disappearing without any button-selection delivery."
             echo "V22: Direct public UIKit UIButton target/action replaces deferred UIAlertAction dismissal handlers while keeping token, queue, copied-string and guest-polling semantics. A separate exact-executable-guarded 1.41 pack installs only Marketplace and eleven assistant WADs with audio; the base Chef/Common data, Fry Guy, saves, purchase/hiring rules and currency remain untouched. Private game data is never uploaded to GitHub."
             echo "Bundle ID: $TEST_BUNDLE_ID"
             echo "V23: The full emulator call starts from a one-shot native main-run-loop timer, after the preparation dispatch callback returns. SDL can service queued UIKit restoration/completion work during gameplay. Emulation stays on the main thread; the existing metadata-refresh guard, background GL pause, V21 run-loop fix, V22 direct alerts and all content/save guards are retained."
-            echo "V23 native validation: the old occupied-main-dispatch context blocks a queued completion while heartbeats continue; the production timer services it inside the core and passes five actual taps across Home/return, Control Center/dismiss, and a second Home/return in landscape. This is simulator evidence; actual iPhone gameplay still needs the user test."
+            echo "V23 native validation is recorded by this workflow's independent native-checks job. Release requires the reproduced occupied-main-dispatch baseline, queued completion serviced during the production timer entry, and five real game/exit taps across Home, Control Center, and Home. The native job and retained guest regressions must pass before private packaging; a compiled IPA alone does not verify input recovery. Actual iPhone gameplay still needs user verification."
             shasum -a 256 ../patches/ios-rendering-backport.patch
             shasum -a 256 ../patches/order-up-crystal-bypass.patch
             shasum -a 256 ../patches/order-up-viewport-v6.py
@@ -251,9 +276,5 @@ jobs:
             build-host.log
             package.log
             verify-ipa.log
-            native-alert-v22.log
-            native-state-v22.log
-            native-taps-*.log
-            native-resume*.log
             native-host-typecheck-v23.log
           if-no-files-found: warn
