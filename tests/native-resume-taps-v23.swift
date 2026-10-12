@@ -41,7 +41,10 @@ final class ResumeTapTests: XCTestCase {
         let panel = springboard.otherElements["cc-root-folder-view"]
         XCTAssertTrue(panel.waitForExistence(timeout: 8), springboard.debugDescription)
         XCTAssertTrue(springboard.buttons["Add Controls"].exists)
-        XCTAssertFalse(game.isHittable, "Control Center must actually cover the game")
+        // The target app's accessibility hit-test flag can stay true beneath
+        // system UI. Require the real UIKit inactive state, without disabling
+        // or replacing any game input in the fixture.
+        XCTAssertTrue(app.staticTexts["Native inactive 2"].waitForExistence(timeout: 8), app.debugDescription)
         let closeStart = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98))
         let closeEnd = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
         closeStart.press(forDuration: 0.05, thenDragTo: closeEnd)

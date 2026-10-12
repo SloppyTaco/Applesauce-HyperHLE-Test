@@ -65,6 +65,7 @@ final class ResumeHarness: NSObject {
     private var beats = 0
     private var taps = 0
     private var inactiveSignals = 0
+    private var measuredInactiveSignal = 0
     private var activeCompletions = 0
     private let baseline = ProcessInfo.processInfo.environment["RESUME_BASELINE"] == "1"
     private let logURL: URL
@@ -168,7 +169,17 @@ final class ResumeHarness: NSObject {
     }
 
     @objc private func tick(_ timer: Timer) {
-        guard UIApplication.shared.applicationState == .active else { return }
+        let state = UIApplication.shared.applicationState
+        guard state == .active else {
+            if running && state == .inactive && inactiveSignals > 0 {
+                foreground.text = "Native inactive \(inactiveSignals)"
+                if measuredInactiveSignal != inactiveSignals {
+                    measuredInactiveSignal = inactiveSignals
+                    log("Actual UIApplication inactive state \(inactiveSignals) observed during core")
+                }
+            }
+            return
+        }
         beats += 1
         heartbeat.text = "Heartbeat \(beats)"
     }
