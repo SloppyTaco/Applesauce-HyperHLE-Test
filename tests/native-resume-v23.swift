@@ -217,8 +217,9 @@ final class ResumeHarness: NSObject {
         var reportedBaseline = false
         while running && ProcessInfo.processInfo.systemUptime < deadline {
             // Exact native SDL UIKit default/tracking run-loop turns.
-            while CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.000002, true) == .handledSource {}
-            while CFRunLoopRunInMode("UITrackingRunLoopMode" as CFString, 0.000002, true) == .handledSource {}
+            while CFRunLoopRunInMode(.defaultMode, 0.000002, true) == .handledSource {}
+            let tracking = CFRunLoopMode(rawValue: "UITrackingRunLoopMode" as CFString)
+            while CFRunLoopRunInMode(tracking, 0.000002, true) == .handledSource {}
             usleep(1000)
             if baseline && !reportedBaseline && ProcessInfo.processInfo.systemUptime - start > 2 {
                 reportedBaseline = true

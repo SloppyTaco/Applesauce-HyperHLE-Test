@@ -7,6 +7,9 @@ on:
     paths:
       - 'patches/ios-main-run-loop-v23.py'
       - 'patches/main-run-loop-launch-v23.swift'
+      - 'tests/native-resume-v23.swift'
+      - 'tests/native-resume-taps-v23.swift'
+      - 'tests/run-native-resume-v23.py'
       - 'tests/application-loop-guest.py'
       - '.github/workflows/verify-order-up-v23.yml'
 

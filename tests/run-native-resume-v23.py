@@ -145,10 +145,12 @@ def main():
                         '-derivedDataPath', str(folder / 'DerivedData'), '-parallel-testing-enabled', 'NO',
                         '-maximum-concurrent-test-simulator-destinations', '1',
                         'CODE_SIGNING_ALLOWED=NO'], text=True, stdout=output, stderr=subprocess.STDOUT, timeout=360)
-                container = run('xcrun', 'simctl', 'get_app_container', udid,
-                    'io.github.sloppytaco.resumev23', 'data', stdout=subprocess.PIPE).stdout.strip()
-                fixture = Path(container) / 'Documents/native-resume-v23.log'
-                content = fixture.read_text() if fixture.is_file() else ''
+                lookup = subprocess.run(['xcrun', 'simctl', 'get_app_container', udid,
+                    'io.github.sloppytaco.resumev23', 'data'], text=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                container = lookup.stdout.strip()
+                fixture = Path(container) / 'Documents/native-resume-v23.log' if lookup.returncode == 0 else None
+                content = fixture.read_text() if fixture is not None and fixture.is_file() else ''
                 args.log.with_name('native-resume-' + label + '.log').write_text(content)
                 outputs.append(content)
                 print(content)
