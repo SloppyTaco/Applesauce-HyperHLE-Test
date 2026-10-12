@@ -36,8 +36,11 @@ final class ResumeTapTests: XCTestCase {
         let bottom = app.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: 0.85))
         top.press(forDuration: 0.05, thenDragTo: bottom)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let airplane = springboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Airplane")).firstMatch
-        XCTAssertTrue(airplane.waitForExistence(timeout: 8), springboard.debugDescription)
+        // A fresh iOS 26 simulator can have an empty controls page. Verify the
+        // actual panel root and its observed system toolbar, not a user widget.
+        let panel = springboard.otherElements["cc-root-folder-view"]
+        XCTAssertTrue(panel.waitForExistence(timeout: 8), springboard.debugDescription)
+        XCTAssertTrue(springboard.buttons["Add Controls"].isHittable)
         XCTAssertFalse(game.isHittable, "Control Center must actually cover the game")
         let closeStart = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98))
         let closeEnd = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
