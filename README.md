@@ -1,3 +1,11 @@
+# V23: native interruption/input recovery
+
+V22 is confirmed working by the user, including the private Farmers Market and assistant content. The remaining report is lost touch input after dismissing iOS system UI while rendering/audio continue. The attached log records successful foreground resumes at about 30 FPS; the original guest pause alone is not the failure.
+
+This version changes only the native launch entry: preparation returns to the main dispatch queue, then the core starts from a native main-run-loop timer. SDL can then service queued UIKit restoration/completion work while emulation remains on the main thread. The existing library refresh guard, background GL pause, V21 application loop, V22 direct alerts, content checks, bundle identity and game saves are retained. New native checks compare blocked dispatch with the production timer and exercise actual landscape Home/return and Control Center/dismiss taps. CI and physical iPhone verification must confirm the change; source preparation alone is not a finished IPA.
+
+Private content is copied byte-for-byte from the user's verified V22 IPA locally. No private game bytes are included in this repository or public CI artifacts.
+
 # Order Up!! V22: native buttons and private 1.41 DLC
 
 The user confirmed V21 fully loads 1.41. Their next phone log continues

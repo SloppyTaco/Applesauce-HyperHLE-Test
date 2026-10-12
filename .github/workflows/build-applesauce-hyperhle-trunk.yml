@@ -1,4 +1,4 @@
-name: Build Applesauce native buttons and private DLC support v22
+name: Build Applesauce native interruption input fix v23
 
 on:
   workflow_dispatch:
@@ -12,6 +12,9 @@ on:
       - 'tests/run-native-alert-v22.py'
       - 'tests/native-alert-taps-v22.m'
       - 'tests/native-alert-taps-v22.swift'
+      - 'tests/run-native-resume-v23.py'
+      - 'tests/native-resume-v23.swift'
+      - 'tests/native-resume-taps-v23.swift'
 
 permissions:
   contents: read
@@ -44,6 +47,11 @@ jobs:
           xcodebuild -version
           rustc --version
           cargo --version
+
+      - name: Verify native timer entry, queued completions, and interruption taps
+        run: |
+          set -euo pipefail
+          python3 tests/run-native-resume-v23.py --log native-resume-v23.log
 
       - name: Verify native state and actual XCUI taps during occupied main dispatch
         run: |
@@ -90,10 +98,20 @@ jobs:
           python3 patches/order-up-alerts-v20.py
           python3 patches/order-up-application-loop-v21.py
           python3 patches/order-up-dlc-v22.py
+          python3 patches/ios-main-run-loop-v23.py
           git -C applesauce diff --check
           git -C applesauce diff --stat
 
-      - name: Keep existing test-app identity and set V22 version
+      - name: Typecheck the actual patched native host before compiling Rust
+        run: |
+          set -euo pipefail
+          sdk_path=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun swiftc -typecheck -swift-version 5 -target arm64-apple-ios16.0 -sdk "$sdk_path" \
+            -import-objc-header applesauce/platform/ios/Sources/TouchHLEHost-Bridging-Header.h \
+            applesauce/platform/ios/Sources/EmulatorCore.swift \
+            applesauce/platform/ios/Sources/NativeHost.swift 2>&1 | tee native-host-typecheck-v23.log
+
+      - name: Keep existing test-app identity and set V23 version
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -108,8 +126,8 @@ jobs:
           verifier.write_text(verifier.read_text().replace('io.github.johnny901901901.applesauce', os.environ['TEST_BUNDLE_ID']))
           PY
           /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Applesauce HLE Test' applesauce/platform/ios/Config/Info.plist
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 22.0.0' applesauce/platform/ios/Config/Info.plist
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 22' applesauce/platform/ios/Config/Info.plist
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 23.0.0' applesauce/platform/ios/Config/Info.plist
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 23' applesauce/platform/ios/Config/Info.plist
 
       - name: Build shared SDL for iPhone
         run: |
@@ -147,6 +165,8 @@ jobs:
             echo "Retained V21: UIApplicationMain restarts stopped main-run-loop activations instead of returning the last timer pointer to guest main and closing the app. CFRunLoopRun/Stop callers, genuine guest exit/abort, all previous alerts and 1.0-specific guards remain unchanged. Nonzero exits record a caller stack for diagnosis. The user confirmed V21 fully loads 1.41; their next log shows a native popup visually disappearing without any button-selection delivery."
             echo "V22: Direct public UIKit UIButton target/action replaces deferred UIAlertAction dismissal handlers while keeping token, queue, copied-string and guest-polling semantics. A separate exact-executable-guarded 1.41 pack installs only Marketplace and eleven assistant WADs with audio; the base Chef/Common data, Fry Guy, saves, purchase/hiring rules and currency remain untouched. Private game data is never uploaded to GitHub."
             echo "Bundle ID: $TEST_BUNDLE_ID"
+            echo "V23: The full emulator call starts from a one-shot native main-run-loop timer, after the preparation dispatch callback returns. SDL can service queued UIKit restoration/completion work during gameplay. Emulation stays on the main thread; the existing metadata-refresh guard, background GL pause, V21 run-loop fix, V22 direct alerts and all content/save guards are retained."
+            echo "V23 native validation: the old occupied-main-dispatch context blocks a queued completion while heartbeats continue; the production timer services it inside the core and passes five actual taps across Home/return, Control Center/dismiss, and a second Home/return in landscape. This is simulator evidence; actual iPhone gameplay still needs the user test."
             shasum -a 256 ../patches/ios-rendering-backport.patch
             shasum -a 256 ../patches/order-up-crystal-bypass.patch
             shasum -a 256 ../patches/order-up-viewport-v6.py
@@ -169,9 +189,11 @@ jobs:
             shasum -a 256 ../patches/order-up-dlc-v22.py
             shasum -a 256 ../patches/order-up-dlc-v22.rs
             shasum -a 256 ../patches/async-alert-uikit-v22.inc
+            shasum -a 256 ../patches/ios-main-run-loop-v23.py
+            shasum -a 256 ../patches/main-run-loop-launch-v23.swift
           } > dist/BUILD_INFO.txt
 
-      - name: Check emulator-only package and compiled V22 code
+      - name: Check emulator-only package and compiled V23 host entry
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -186,8 +208,11 @@ jobs:
               info = plistlib.loads(ipa.read('Payload/Applesauce.app/Info.plist'))
               assert info['CFBundleIdentifier'] == 'io.github.sloppytaco.applesaucehyperhletest'
               assert info['CFBundleDisplayName'] == 'Applesauce HLE Test'
-              assert info['CFBundleShortVersionString'] == '22.0.0'
-              assert str(info['CFBundleVersion']) == '22'
+              assert info['CFBundleShortVersionString'] == '23.0.0'
+              assert str(info['CFBundleVersion']) == '23'
+              host = ipa.read('Payload/Applesauce.app/' + info['CFBundleExecutable'])
+              assert b'[MAIN RUN LOOP v23]' in host
+              assert b'TouchHLEMainRunLoopLaunch' in host
               core = ipa.read('Payload/Applesauce.app/Frameworks/libhyperhle_core.dylib')
               assert struct.unpack_from('<II', core) == (0xFEEDFACF, 0x0100000C)
               for marker in (b'[ORDER UP FORMAT v16]', b'[ORDER UP PURCHASE v16]',
@@ -203,13 +228,13 @@ jobs:
                              b'_SDL_TOUCHHLE_AlertDismissV20', b'_SDL_TOUCHHLE_AlertResetV20'):
                   assert symbol in sdl, symbol
               assert b'[ALERT NATIVE v22]' in sdl
-          print('Verified ARM64 V22 private DLC support and direct-action shared SDL bridge; emulator-only IPA has no private game assets.')
+          print('Verified V23 native timer entry with retained ARM64 V22 core/DLC/direct-alert support; emulator-only IPA has no private game assets.')
           PY
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Applesauce-HLE-Rendering-Test-v22
+          name: Applesauce-HLE-Rendering-Test-v23
           path: |
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa
             applesauce/dist/Applesauce-HLE-Rendering-Test.ipa.sha256
@@ -229,4 +254,6 @@ jobs:
             native-alert-v22.log
             native-state-v22.log
             native-taps-*.log
+            native-resume*.log
+            native-host-typecheck-v23.log
           if-no-files-found: warn
